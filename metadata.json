@@ -1,0 +1,10 @@
+{
+  "name": "VDA Health Assistant",
+  "description": "Voice-first ABDM-compliant AI health navigation mobile app with FHIR R4 records, clinical safety gate, and government scheme finder.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,794 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, AlertTriangle, QrCode, ShieldAlert, Sparkles, CheckCircle2, Phone, ShieldCheck, ChevronDown, ChevronUp } from 'lucide-react';
+import { ChatMessage, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from '../types';
+import { getTranslation, speakText, stopSpeaking, playChime, getLocalizedField } from '../utils/i18n';
+import { getChatMessageText, getQuickActionLabel, getCardTitle } from '../utils/vdaEngine';
+
+interface VdaTabProps {
+  patient: PatientDemographics;
+  medications: FhirMedication[];
+  observations: FhirObservation[];
+  lang: LanguageCode;
+  messages: ChatMessage[];
+  onSendMessage: (text: string) => void;
+  onToggleMedicationTaken: (medId: string) => void;
+  onNavigateTab: (tab: 'vda' | 'records' | 'facilities' | 'profile') => void;
+  onTriggerEscalation: (reason: string) => void;
+  onOpenLogVital: () => void;
+}
+
+export const VdaTab: React.FC<VdaTabProps> = ({
+  patient,
+  medications,
+  observations,
+  lang,
+  messages,
+  onSendMessage,
+  onToggleMedicationTaken,
+  onNavigateTab,
+  onTriggerEscalation,
+  onOpenLogVital
+}) => {
+  const [inputText, setInputText] = useState('');
+  const [isListening, setIsListening] = useState(false);
+  const [speechTranscript, setSpeechTranscript] = useState('');
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+  const [showSymptomGrid, setShowSymptomGrid] = useState(false);
+  const [showEmergencyDial, setShowEmergencyDial] = useState(false);
+
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
+
+  // Auto-scroll chat to latest message
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [messages, isListening]);
+
+  // Initialize Web Speech API for voice assistant
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+
+        const langMap: Record<LanguageCode, string> = {
+          hi: 'hi-IN',
+          en: 'en-IN',
+          ta: 'ta-IN',
+          kn: 'kn-IN'
+        };
+        recognition.lang = langMap[lang] || 'hi-IN';
+
+        recognition.onstart = () => {
+          setIsListening(true);
+          playChime('start');
+        };
+
+        recognition.onresult = (event: any) => {
+          const current = event.resultIndex;
+          const transcript = event.results[current][0].transcript;
+          setSpeechTranscript(transcript);
+
+          if (event.results[current].isFinal) {
+            onSendMessage(transcript);
+            setIsListening(false);
+            setSpeechTranscript('');
+            playChime('success');
+          }
+        };
+
+        recognition.onerror = () => {
+          setIsListening(false);
+          setSpeechTranscript('');
+          playChime('stop');
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+        };
+
+        recognitionRef.current = recognition;
+      }
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {
+          // ignore
+        }
+      }
+      stopSpeaking();
+    };
+  }, [lang, onSendMessage]);
+
+  const handleToggleListening = () => {
+    if (!recognitionRef.current) {
+      // Fallback if browser speech synthesis or mic is unavailable in iframe
+      const sampleQueries = {
+        hi: ['मेरी आज की दवाइयों का समय बताएं', 'मेरी शुगर रिपोर्ट कैसी है?', 'नजदीकी सरकारी अस्पताल कहां है?', 'आयुष्मान योजना के क्या लाभ हैं?'],
+        en: ['What is my medication schedule today?', 'Explain my blood sugar lab report', 'Where is the nearest ABDM hospital?', 'What are my Ayushman PM-JAY benefits?'],
+        ta: ['இன்றைய எனது மருந்து அட்டவணை என்ன?', 'எனது சர்க்கரை பரிசோதனை அறிக்கையை விளக்குங்கள்', 'அருகிலுள்ள அரசு மருத்துவமனை எங்கே?', 'ஆயுஷ்மான் திட்ட நன்மைகள் என்ன?'],
+        kn: ['ಇಂದಿನ ನನ್ನ ಔಷಧಿಗಳ ವೇಳಾಪಟ್ಟಿ ಏನು?', 'ನನ್ನ ಸಕ್ಕರೆ ಪರೀಕ್ಷೆಯ ವರದಿಯನ್ನು ವಿವರಿಸಿ', 'ಹತ್ತಿರದ ಸರ್ಕಾರಿ ಆಸ್ಪತ್ರೆ ಎಲ್ಲಿದೆ?', 'ಆಯುಷ್ಮಾನ್ ಯೋಜನೆಯ ಪ್ರಯೋಜನಗಳೇನು?']
+      };
+      const queries = sampleQueries[lang] || sampleQueries.en;
+      const randomQuery = queries[Math.floor(Math.random() * queries.length)];
+      onSendMessage(randomQuery);
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      playChime('stop');
+    } else {
+      try {
+        recognitionRef.current.start();
+      } catch {
+        recognitionRef.current.stop();
+        setTimeout(() => recognitionRef.current.start(), 200);
+      }
+    }
+  };
+
+  const handleSpeakMessage = (msg: ChatMessage) => {
+    if (speakingMsgId === msg.id) {
+      stopSpeaking();
+      setSpeakingMsgId(null);
+    } else {
+      setSpeakingMsgId(msg.id);
+      const textToSpeak = getChatMessageText(msg, lang);
+      speakText(textToSpeak, lang, () => {
+        setSpeakingMsgId(null);
+      });
+    }
+  };
+
+  const handleSendText = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputText.trim()) return;
+    onSendMessage(inputText.trim());
+    setInputText('');
+  };
+
+  const handleSymptomClick = (symptomKey: string, symptomQuery: { hi: string; en: string; ta: string; kn: string }) => {
+    playChime('start');
+    const queryText = symptomQuery[lang] || symptomQuery.en;
+    speakText(queryText, lang);
+    onSendMessage(queryText);
+    setShowSymptomGrid(false);
+  };
+
+  const renderAgentBadge = (agent?: string) => {
+    switch (agent) {
+      case 'medication':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+            <Pill className="w-3 h-3" /> {getTranslation(lang, 'medicationAgent')}
+          </span>
+        );
+      case 'lab_explainer':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <Activity className="w-3 h-3" /> {getTranslation(lang, 'labAgent')}
+          </span>
+        );
+      case 'facility':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            <Building2 className="w-3 h-3" /> {getTranslation(lang, 'hospitalAgent')}
+          </span>
+        );
+      case 'scheme':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">
+            <Award className="w-3 h-3" /> {getTranslation(lang, 'schemeAgent')}
+          </span>
+        );
+      case 'safety_gate':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse">
+            <ShieldAlert className="w-3 h-3" /> {getTranslation(lang, 'safetyGateAgent')}
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-teal-500/10 text-teal-400 border border-teal-500/20">
+            <Sparkles className="w-3 h-3" /> {getTranslation(lang, 'multiAgentVda')}
+          </span>
+        );
+    }
+  };
+
+  const patientDistrict = getLocalizedField(patient, 'district', lang);
+  const patientState = getLocalizedField(patient, 'state', lang);
+
+  // Pictorial Symptoms list
+  const PICTORIAL_SYMPTOMS = [
+    {
+      id: 'headache',
+      icon: '🤕',
+      label: getTranslation(lang, 'headacheSymptom'),
+      queries: {
+        hi: 'मुझे तेज सिरदर्द और चक्कर आ रहे हैं, क्या करना चाहिए?',
+        en: 'I have a bad headache and dizziness. What should I do?',
+        ta: 'எனக்கு கடுமையான தலைவலி மற்றும் மயக்கம் உள்ளது. என்ன செய்ய வேண்டும்?',
+        kn: 'ನನಗೆ ತೀವ್ರ ತಲೆನೋವು ಮತ್ತು ತಲೆತಿರುಗುವಿಕೆ ಇದೆ. ಏನು ಮಾಡಬೇಕು?'
+      }
+    },
+    {
+      id: 'chestpain',
+      icon: '🫀',
+      label: getTranslation(lang, 'chestPainSymptom'),
+      queries: {
+        hi: 'मेरी छाती में भारीपन और तेज दर्द हो रहा है।',
+        en: 'I have severe chest tightness and left arm numbness.',
+        ta: 'எனக்கு நெஞ்சில் கடுமையான வலியும் அழுத்தமும் உள்ளது.',
+        kn: 'ನನಗೆ ಎದೆ ಬಿಗಿತ ಮತ್ತು ಎಡಗೈ ನೋವು ಇದೆ.'
+      }
+    },
+    {
+      id: 'stomach',
+      icon: '🤢',
+      label: getTranslation(lang, 'stomachPainSymptom'),
+      queries: {
+        hi: 'मेरे पेट में दर्द और गैस की समस्या हो रही है।',
+        en: 'I have stomach ache and acidity after meals.',
+        ta: 'எனக்கு வயிற்று வலி மற்றும் வாயு தொல்லை உள்ளது.',
+        kn: 'ನನಗೆ ಹೊಟ್ಟೆ ನೋವು ಮತ್ತು ಗ್ಯಾಸ್ಟ್ರಿಕ್ ಸಮಸ್ಯೆ ಇದೆ.'
+      }
+    },
+    {
+      id: 'fever',
+      icon: '🤒',
+      label: getTranslation(lang, 'feverSymptom'),
+      queries: {
+        hi: 'मुझे तेज बुखार और बदन में दर्द है।',
+        en: 'I have high fever and severe body aches.',
+        ta: 'எனக்கு அதிக காய்ச்சலும் உடல் வலியும் உள்ளது.',
+        kn: 'ನನಗೆ ತೀವ್ರ ಜ್ವರ ಮತ್ತು ಮೈಕೈ ನೋವು ಇದೆ.'
+      }
+    },
+    {
+      id: 'sugar',
+      icon: '🍯',
+      label: getTranslation(lang, 'sugarThirstSymptom'),
+      queries: {
+        hi: 'मुझे बहुत ज्यादा प्यास लग रही है और बार-बार पेशाब आ रहा है।',
+        en: 'I feel excessive thirst and frequent urination.',
+        ta: 'எனக்கு அதிக தாகமும் அடிக்கடி சிறுநீரும் வருகிறது.',
+        kn: 'ನನಗೆ ಅತಿಯಾದ ಬಾಯಾರಿಕೆ ಮತ್ತು ಪದೇ ಪದೇ ಮೂತ್ರ ಬರುತ್ತಿದೆ.'
+      }
+    },
+    {
+      id: 'foot',
+      icon: '🦵',
+      label: getTranslation(lang, 'footPainSymptom'),
+      queries: {
+        hi: 'मेरे पैरों में झनझनाहट और सुन्नता महसूस होती है।',
+        en: 'I have tingling and numbness in my feet.',
+        ta: 'எனது கால்களில் மரத்துப்போகும் உணர்வு உள்ளது.',
+        kn: 'ನನ್ನ ಪಾದಗಳಲ್ಲಿ ಜುಮ್ಮೆನಿಸುವಿಕೆ ಮತ್ತು ಸ್ಪರ್ಶವಿಲ್ಲದಂತಿದೆ.'
+      }
+    },
+    {
+      id: 'pregnancy',
+      icon: '🤰',
+      label: getTranslation(lang, 'pregnancySymptom'),
+      queries: {
+        hi: 'गर्भावस्था में पोषण और आयरन फोलिक एसिड गोली का समय बताएं।',
+        en: 'Explain maternal care, IFA tablets, and checkup schedule.',
+        ta: 'கர்ப்பகால பராமரிப்பு மற்றும் இரும்பு சத்து மாத்திரை விவரம் சொல்லுங்கள்.',
+        kn: 'ಗರ್ಭಿಣಿಯರ ಆರೈಕೆ ಮತ್ತು ಪೌಷ್ಟಿಕಾಂಶದ ವಿವರಗಳನ್ನು ತಿಳಿಸಿ.'
+      }
+    },
+    {
+      id: 'wound',
+      icon: '🩹',
+      label: getTranslation(lang, 'woundSymptom'),
+      queries: {
+        hi: 'चोट या घाव की प्राथमिक चिकित्सा कैसे करें?',
+        en: 'How to do first aid for a cut or wound?',
+        ta: 'காயத்திற்கு முதலுதவி செய்வது எப்படி?',
+        kn: 'ಗಾಯಕ್ಕೆ ಪ್ರಥಮ ಚಿಕಿತ್ಸೆ ಹೇಗೆ ಮಾಡುವುದು?'
+      }
+    }
+  ];
+
+  return (
+    <div className="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden relative">
+      {/* Top Header */}
+      <header className="px-3.5 py-2.5 sm:px-4 sm:py-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between z-10 backdrop-blur-md flex-shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-md shadow-emerald-950 flex-shrink-0">
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <h1 className="text-sm font-bold text-white tracking-tight truncate">{patient.name}</h1>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono font-medium whitespace-nowrap">
+                ABHA Active
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 truncate">
+              {patientDistrict}, {patientState} • NCD Care
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {/* Emergency Quick Dial Trigger */}
+          <button
+            onClick={() => setShowEmergencyDial(!showEmergencyDial)}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-bold transition-all active:scale-95 whitespace-nowrap"
+            title="Emergency Speed Dial (24x7)"
+          >
+            <Phone className="w-3.5 h-3.5" />
+            <span>SOS</span>
+          </button>
+
+          {/* Test Safety Escalation Trigger Button */}
+          <button
+            id="trigger-test-safety-btn"
+            onClick={() => onTriggerEscalation('Severe chest tightness and left arm numbness')}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 text-xs font-semibold transition-colors active:scale-95 whitespace-nowrap"
+            title="Simulate Safety Gate Clinical Escalation"
+          >
+            <AlertTriangle className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{getTranslation(lang, 'safetyGateBadge')}</span>
+            <span className="sm:hidden">Gate</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Main Chat Messages Container */}
+      <div
+        ref={chatScrollRef}
+        className="flex-1 overflow-y-auto px-3.5 sm:px-4 py-3.5 space-y-3.5 scroll-smooth min-h-0"
+      >
+        {/* AAROGYA SETU 2.0 STATUS SHIELD BANNER */}
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 via-slate-900 to-teal-950/80 border border-emerald-500/40 relative overflow-hidden shadow-lg space-y-2.5">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <h2 className="text-xs font-extrabold text-white tracking-tight">
+                    {getTranslation(lang, 'aarogyaStatusSafe')}
+                  </h2>
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                </div>
+                <p className="text-[10.5px] text-emerald-300/90 leading-tight truncate">
+                  {getTranslation(lang, 'aarogyaStatusDetail')}
+                </p>
+              </div>
+            </div>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30 whitespace-nowrap flex-shrink-0">
+              {getTranslation(lang, 'abhaVerifiedBadge')}
+            </span>
+          </div>
+
+          {/* Quick Speed Dial Bar in Banner */}
+          <div className="pt-2 border-t border-emerald-500/20 grid grid-cols-4 gap-1.5 sm:gap-2 text-center">
+            <a
+              href="tel:108"
+              className="py-1.5 px-1 rounded-xl bg-slate-950/70 hover:bg-slate-950 text-emerald-300 font-bold text-[11px] flex items-center justify-center gap-1 border border-emerald-500/20 transition-all active:scale-95"
+            >
+              <span>🚑</span>
+              <span>108</span>
+            </a>
+            <a
+              href="tel:104"
+              className="py-1.5 px-1 rounded-xl bg-slate-950/70 hover:bg-slate-950 text-emerald-300 font-bold text-[11px] flex items-center justify-center gap-1 border border-emerald-500/20 transition-all active:scale-95"
+            >
+              <span>🩺</span>
+              <span>104</span>
+            </a>
+            <a
+              href="tel:112"
+              className="py-1.5 px-1 rounded-xl bg-slate-950/70 hover:bg-slate-950 text-red-300 font-bold text-[11px] flex items-center justify-center gap-1 border border-red-500/20 transition-all active:scale-95"
+            >
+              <span>🚨</span>
+              <span>112</span>
+            </a>
+            <a
+              href="tel:14555"
+              className="py-1.5 px-1 rounded-xl bg-slate-950/70 hover:bg-slate-950 text-amber-300 font-bold text-[11px] flex items-center justify-center gap-1 border border-amber-500/20 transition-all active:scale-95"
+            >
+              <span>💳</span>
+              <span>14555</span>
+            </a>
+          </div>
+        </div>
+
+        {/* PICTORIAL SYMPTOM ACCESSIBILITY SELECTOR */}
+        <div className="rounded-2xl bg-slate-900 border border-slate-800 overflow-hidden">
+          <button
+            onClick={() => setShowSymptomGrid(!showSymptomGrid)}
+            className="w-full p-3 flex items-center justify-between text-left hover:bg-slate-800/60 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-base">🩺</span>
+              <div>
+                <h3 className="text-xs font-bold text-white">{getTranslation(lang, 'symptomGridTitle')}</h3>
+                <p className="text-[10px] text-slate-400">{getTranslation(lang, 'symptomGridSub')}</p>
+              </div>
+            </div>
+            {showSymptomGrid ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+          </button>
+
+          {showSymptomGrid && (
+            <div className="p-3 pt-0 grid grid-cols-2 sm:grid-cols-4 gap-2 border-t border-slate-800/80 mt-1">
+              {PICTORIAL_SYMPTOMS.map((sym) => (
+                <button
+                  key={sym.id}
+                  onClick={() => handleSymptomClick(sym.id, sym.queries)}
+                  className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 hover:border-emerald-500/50 text-left transition-all active:scale-95 flex flex-col gap-1"
+                >
+                  <span className="text-xl">{sym.icon}</span>
+                  <span className="text-xs font-bold text-white leading-tight">{sym.label}</span>
+                  <span className="text-[9px] text-emerald-400 font-semibold">{getTranslation(lang, 'askAboutSymptom')}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Message Bubble Stream */}
+        {messages.map((msg) => {
+          const isUser = msg.sender === 'user';
+          const isSpeaking = speakingMsgId === msg.id;
+          const displayMessageText = getChatMessageText(msg, lang);
+
+          return (
+            <div
+              key={msg.id}
+              className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} space-y-1`}
+            >
+              {/* Agent Badge for AI */}
+              {!isUser && (
+                <div className="flex items-center gap-2 mb-0.5">
+                  {renderAgentBadge(msg.agent)}
+                  <span className="text-[10px] text-slate-500 font-mono">{msg.timestamp}</span>
+                </div>
+              )}
+
+              {/* Message Box */}
+              <div
+                className={`max-w-[85%] rounded-2xl p-3.5 text-xs sm:text-sm leading-relaxed relative ${
+                  isUser
+                    ? 'bg-emerald-600 text-white rounded-br-none shadow-md shadow-emerald-950'
+                    : msg.isEscalationTrigger
+                    ? 'bg-red-950/80 border border-red-500/50 text-red-100 rounded-bl-none shadow-lg'
+                    : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none shadow-sm'
+                }`}
+              >
+                <p className="whitespace-pre-line font-medium">
+                  {displayMessageText}
+                </p>
+
+                {/* Read Aloud Button for low-literacy users */}
+                {!isUser && (
+                  <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between">
+                    <button
+                      onClick={() => handleSpeakMessage(msg)}
+                      className={`flex items-center gap-1.5 text-[11px] font-semibold px-2 py-1 rounded-lg transition-all ${
+                        isSpeaking
+                          ? 'bg-emerald-500 text-slate-950 animate-pulse'
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      }`}
+                    >
+                      {isSpeaking ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />}
+                      <span>{isSpeaking ? getTranslation(lang, 'stopReading') : getTranslation(lang, 'readAloud')}</span>
+                    </button>
+                    <span className="text-[10px] text-slate-500">FHIR R4 Verified</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Embedded Rich Card Data */}
+              {msg.cardData && (
+                <div className="w-full max-w-[85%] mt-1">
+                  {msg.cardData.type === 'medication_reminder' && (
+                    <div className="p-3 rounded-2xl bg-slate-900 border border-blue-500/30 text-xs">
+                      <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800">
+                        <span className="font-bold text-blue-400 flex items-center gap-1">
+                          <Pill className="w-3.5 h-3.5" /> {getCardTitle(msg.cardData, lang)}
+                        </span>
+                        <span className="text-[10px] text-slate-400">AIIMS Prescription</span>
+                      </div>
+                      <div className="space-y-2">
+                        {medications.slice(0, 3).map((med) => (
+                          <div key={med.id} className="flex items-center justify-between p-2 rounded-xl bg-slate-950/70 border border-slate-800/80">
+                            <div>
+                              <p className="font-semibold text-white text-xs">{getLocalizedField(med, 'name', lang)}</p>
+                              <p className="text-[10px] text-slate-400">{getLocalizedField(med, 'dosage', lang)}</p>
+                            </div>
+                            <button
+                              onClick={() => onToggleMedicationTaken(med.id)}
+                              className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                                med.takenToday
+                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                              }`}
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>{med.takenToday ? getTranslation(lang, 'takenToday') : getTranslation(lang, 'markTaken')}</span>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {msg.cardData.type === 'lab_highlight' && (
+                    <div className="p-3 rounded-2xl bg-slate-900 border border-emerald-500/30 text-xs">
+                      <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800">
+                        <span className="font-bold text-emerald-400 flex items-center gap-1">
+                          <Activity className="w-3.5 h-3.5" /> {getCardTitle(msg.cardData, lang)}
+                        </span>
+                        <span className="text-[10px] text-slate-400">LOINC: 4548-4</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mb-2">
+                        <div className="p-2 rounded-xl bg-slate-950/80 border border-slate-800">
+                          <p className="text-[10px] text-slate-400">HbA1c (3 Month Sugar)</p>
+                          <p className="text-base font-bold text-emerald-400">7.8 %</p>
+                          <p className="text-[9px] text-slate-400">Target &lt; 7.0%</p>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-950/80 border border-slate-800">
+                          <p className="text-[10px] text-slate-400">Blood Pressure</p>
+                          <p className="text-base font-bold text-blue-400">132/84</p>
+                          <p className="text-[9px] text-slate-400">Telmisartan 40mg</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {msg.cardData.type === 'facility_qr' && (
+                    <div className="p-3 rounded-2xl bg-slate-900 border border-amber-500/30 text-xs">
+                      <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800">
+                        <span className="font-bold text-amber-400 flex items-center gap-1">
+                          <QrCode className="w-3.5 h-3.5" /> {getCardTitle(msg.cardData, lang)}
+                        </span>
+                        <span className="text-[10px] text-emerald-400 font-semibold">Active</span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 mb-2">
+                        District Hospital Sitapur • OPD Gate No. 2
+                      </p>
+                      <button
+                        onClick={() => onNavigateTab('facilities')}
+                        className="w-full py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-semibold border border-amber-500/30 flex items-center justify-center gap-1.5"
+                      >
+                        <QrCode className="w-3.5 h-3.5" />
+                        <span>{getTranslation(lang, 'generateQrToken')}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Quick Action Buttons */}
+              {msg.quickActions && msg.quickActions.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {msg.quickActions.map((qa, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        if (qa.action === 'show_records_meds' || qa.action === 'show_records_obs') {
+                          onNavigateTab('records');
+                        } else if (qa.action === 'open_log_vital') {
+                          onOpenLogVital();
+                        } else if (qa.action === 'show_opd_token' || qa.action === 'show_schemes' || qa.action === 'find_jan_aushadhi') {
+                          onNavigateTab('facilities');
+                        } else if (qa.action === 'ask_medicines') {
+                          onSendMessage(getTranslation(lang, 'myMedicinesChip'));
+                        } else if (qa.action === 'ask_sugar_lab') {
+                          onSendMessage(getTranslation(lang, 'sugarLabChip'));
+                        } else if (qa.action === 'ask_hospital') {
+                          onSendMessage(getTranslation(lang, 'nearbyHospitalChip'));
+                        } else if (qa.action === 'ask_scheme') {
+                          onSendMessage(getTranslation(lang, 'pmjayBenefitsChip'));
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 transition-all active:scale-95"
+                    >
+                      {getQuickActionLabel(qa, lang)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Live Speech Recognition Transcript Floating Bubble */}
+        {isListening && (
+          <div className="p-3 rounded-2xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-200 text-xs animate-pulse flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
+            <div className="flex-1">
+              <span className="font-semibold">{getTranslation(lang, 'listening')}</span>
+              <p className="text-white font-medium mt-0.5">{speechTranscript || '...'}</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Persistent Bottom Voice & Input Deck */}
+      <div className="flex-shrink-0 bg-slate-950/95 border-t border-slate-800/80 px-3 py-2.5 space-y-2 backdrop-blur-md z-20 shadow-lg">
+        {/* Suggestion Chips */}
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none no-scrollbar">
+          <button
+            onClick={() => onSendMessage(getTranslation(lang, 'myMedicinesChip'))}
+            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95"
+          >
+            <Pill className="w-3.5 h-3.5 text-blue-400" />
+            <span>{getTranslation(lang, 'myMedicinesChip')}</span>
+          </button>
+          <button
+            onClick={() => onSendMessage(getTranslation(lang, 'sugarLabChip'))}
+            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95"
+          >
+            <Activity className="w-3.5 h-3.5 text-emerald-400" />
+            <span>{getTranslation(lang, 'sugarLabChip')}</span>
+          </button>
+          <button
+            onClick={() => onSendMessage(getTranslation(lang, 'nearbyHospitalChip'))}
+            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95"
+          >
+            <Building2 className="w-3.5 h-3.5 text-amber-400" />
+            <span>{getTranslation(lang, 'nearbyHospitalChip')}</span>
+          </button>
+          <button
+            onClick={() => onSendMessage(getTranslation(lang, 'pmjayBenefitsChip'))}
+            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95"
+          >
+            <Award className="w-3.5 h-3.5 text-purple-400" />
+            <span>{getTranslation(lang, 'pmjayBenefitsChip')}</span>
+          </button>
+        </div>
+
+        {/* Input Row & Hero Mic Button */}
+        <div className="flex items-center gap-2">
+          {/* Secondary Text Input Box */}
+          <form onSubmit={handleSendText} className="flex-1 flex items-center gap-1 bg-slate-900/90 border border-slate-800 rounded-2xl px-3.5 py-2 focus-within:border-emerald-500/60 transition-all shadow-sm">
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder={getTranslation(lang, 'typeMessagePlaceholder')}
+              className="flex-1 bg-transparent text-xs text-white placeholder:text-slate-500 focus:outline-none"
+            />
+            {inputText.trim() && (
+              <button
+                type="submit"
+                className="p-1.5 rounded-xl bg-emerald-500 text-slate-950 hover:bg-emerald-400 transition-all"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </form>
+
+          {/* Hero Thumb-Accessible Voice Microphone Button */}
+          <button
+            id="vda-hero-mic-btn"
+            onClick={handleToggleListening}
+            className={`relative flex-shrink-0 flex items-center justify-center w-11 h-11 sm:w-12 sm:h-12 rounded-2xl transition-all shadow-xl active:scale-95 ${
+              isListening
+                ? 'bg-red-500 text-white ring-4 ring-red-500/40 shadow-red-950 animate-pulse'
+                : 'bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 hover:from-emerald-400 hover:to-teal-300 shadow-emerald-950/60 ring-2 ring-emerald-400/30'
+            }`}
+            title="Tap to speak with VDA Voice Assistant"
+          >
+            {isListening ? (
+              <MicOff className="w-5 h-5 sm:w-6 sm:h-6" />
+            ) : (
+              <Mic className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.5]" />
+            )}
+
+            {/* Pulsing Voice Waves Ring */}
+            {isListening && (
+              <span className="absolute -inset-1 rounded-2xl border-2 border-red-400 animate-ping opacity-75 pointer-events-none" />
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* SOS / Emergency Speed Dial Modal */}
+      {showEmergencyDial && (
+        <div className="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-md p-6 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                <Phone className="w-4 h-4 text-red-400" />
+                <span>{getTranslation(lang, 'emergencyDialTitle')}</span>
+              </h3>
+              <button
+                onClick={() => setShowEmergencyDial(false)}
+                className="text-xs px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300"
+              >
+                {getTranslation(lang, 'close')}
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <a
+                href="tel:108"
+                className="p-4 rounded-2xl bg-red-950/60 border border-red-500/40 flex items-center justify-between text-white hover:bg-red-900/50 transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">🚑</span>
+                  <div>
+                    <h4 className="text-base font-extrabold">{getTranslation(lang, 'ambulance108')}</h4>
+                    <p className="text-xs text-red-300">National Ambulance Service</p>
+                  </div>
+                </div>
+                <Phone className="w-5 h-5 text-red-400" />
+              </a>
+
+              <a
+                href="tel:104"
+                className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 flex items-center justify-between text-white hover:bg-emerald-900/50 transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">🩺</span>
+                  <div>
+                    <h4 className="text-base font-extrabold">{getTranslation(lang, 'healthHelpline104')}</h4>
+                    <p className="text-xs text-emerald-300">State Medical Advice & Tele-Triage</p>
+                  </div>
+                </div>
+                <Phone className="w-5 h-5 text-emerald-400" />
+              </a>
+
+              <a
+                href="tel:112"
+                className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between text-white hover:bg-slate-850 transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">🚨</span>
+                  <div>
+                    <h4 className="text-base font-extrabold">{getTranslation(lang, 'emergency112')}</h4>
+                    <p className="text-xs text-slate-400">All-in-One Emergency SOS</p>
+                  </div>
+                </div>
+                <Phone className="w-5 h-5 text-slate-300" />
+              </a>
+
+              <a
+                href="tel:14555"
+                className="p-4 rounded-2xl bg-amber-950/50 border border-amber-500/40 flex items-center justify-between text-white hover:bg-amber-900/50 transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">💳</span>
+                  <div>
+                    <h4 className="text-base font-extrabold">{getTranslation(lang, 'ayushman14555')}</h4>
+                    <p className="text-xs text-amber-300">PM-JAY Health Coverage Helpline</p>
+                  </div>
+                </div>
+                <Phone className="w-5 h-5 text-amber-400" />
+              </a>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowEmergencyDial(false)}
+            className="w-full py-3.5 rounded-2xl bg-slate-800 text-white font-bold text-sm"
+          >
+            {getTranslation(lang, 'done')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};

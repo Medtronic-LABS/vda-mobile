@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">VDA Health Assistant</string>
+    <string name="title_activity_main">VDA Health Assistant</string>
+    <string name="package_name">in.gov.abdm.vdahealth</string>
+    <string name="custom_url_scheme">in.gov.abdm.vdahealth</string>
+</resources>
