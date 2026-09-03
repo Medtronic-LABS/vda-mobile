@@ -15,7 +15,7 @@ export interface SafetyCheckResult {
 const CRITICAL_SYMPTOM_PATTERNS = [
   {
     category: 'CARDIAC' as const,
-    regex: /(chest pain|chest tightness|pressure in chest|छाती में दर्द|सीने में दर्द|छाती में जकड़न|மார்பு வலி|எದೆ ನೋವು|heart attack|radiating to left arm|पसीने के साथ दर्द)/i,
+    regex: /(chest pain|chest tightness|pressure in chest|छाती में दर्द|सीने में दर्द|छाती में जकड़न|மார்பு வலி|ಎದೆ ನೋವು|heart attack|radiating to left arm|पसीने के साथ दर्द)/i,
     reason: 'Possible Acute Coronary Syndrome (ACS) / Cardiac Emergency',
     reasonHi: 'संभावित हृदय संबंधी आपातकाल (हार्ट अटैक के लक्षण)',
     action: 'Immediate hospital visit + 108 Emergency ambulance dispatch'

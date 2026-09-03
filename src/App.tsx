@@ -24,6 +24,7 @@ export default function App() {
 
   // Backend VDA Session State
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [isProcessingMessage, setIsProcessingMessage] = useState(false);
 
   // App Flow Modals
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
@@ -147,7 +148,11 @@ export default function App() {
 
   // Process user message with optional prescription document attachment
   const handleSendMessage = async (userText: string, attachmentFile?: File) => {
+    if (isProcessingMessage) return;
     playChime('start');
+    setIsProcessingMessage(true);
+
+    try {
 
     let attachmentInfo = undefined;
     if (attachmentFile) {
@@ -200,25 +205,28 @@ export default function App() {
       }
     }
 
-    try {
-      const result = await apiService.processVdaQuery(userText, patient, medications, observations, lang, currentSessionId);
-      if (result.responseType !== 'clinical-review') setMessages((prev) => [...prev, result.message]);
-      if (currentSessionId && (result.escalationDetected || result.responseType === 'clinical-review')) {
-        const state = await apiService.getClinicalReviewState(currentSessionId);
-        setClinicalReview(state);
-        if (result.escalationDetected) {
-          setEmergencyInstruction(lang === 'hi' ? (result.message.textHi || result.message.text) : result.message.text);
+      try {
+        const result = await apiService.processVdaQuery(userText, patient, medications, observations, lang, currentSessionId);
+        if (result.responseType !== 'clinical-review') setMessages((prev) => [...prev, result.message]);
+        if (currentSessionId && (result.escalationDetected || result.responseType === 'clinical-review')) {
+          const state = await apiService.getClinicalReviewState(currentSessionId);
+          setClinicalReview(state);
+          if (result.escalationDetected) {
+            setEmergencyInstruction(lang === 'hi' ? (result.message.textHi || result.message.text) : result.message.text);
+          }
         }
+      } catch {
+        setMessages((prev) => [...prev, {
+          id: `backend-unavailable-${Date.now()}`,
+          sender: 'vda',
+          agent: 'router',
+          text: 'VDA service is unavailable. Please try again.',
+          textHi: 'VDA सेवा अभी उपलब्ध नहीं है। कृपया फिर प्रयास करें।',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        }]);
       }
-    } catch {
-      setMessages((prev) => [...prev, {
-        id: `backend-unavailable-${Date.now()}`,
-        sender: 'vda',
-        agent: 'router',
-        text: 'VDA service is unavailable. Please try again.',
-        textHi: 'VDA सेवा अभी उपलब्ध नहीं है। कृपया फिर प्रयास करें।',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      }]);
+    } finally {
+      setIsProcessingMessage(false);
     }
   };
 
@@ -311,6 +319,7 @@ export default function App() {
               observations={observations}
               lang={lang}
               messages={messages}
+              isProcessing={isProcessingMessage}
               onSendMessage={handleSendMessage}
               onToggleMedicationTaken={handleToggleMedication}
               onNavigateTab={setActiveTab}
