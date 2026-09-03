@@ -4,6 +4,8 @@ import { runDeterministicSafetyGate, createEscalationPayload } from './safetyGat
 export interface VdaProcessResult {
   message: ChatMessage;
   escalationState?: ReturnType<typeof createEscalationPayload>;
+  escalationDetected?: boolean;
+  responseType?: string;
 }
 
 export function getChatMessageText(msg: ChatMessage, lang: LanguageCode): string {

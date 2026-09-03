@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
 import { Sparkles, FileText, Building2, User } from 'lucide-react';
-import { ChatMessage, ClinicalEscalationState, FhirCondition, FhirDocument, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from './types';
+import { ChatMessage, ClinicalReviewState, FhirCondition, FhirDocument, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from './types';
 import { SYNTHETIC_PATIENTS, FACILITIES_LIST, HEALTH_SCHEMES_LIST } from './data/syntheticData';
 import { getTranslation, playChime } from './utils/i18n';
-import { processVdaQuery } from './utils/vdaEngine';
-import { createEscalationPayload } from './utils/safetyGate';
 import { apiService } from './services/api';
 
 // Tab & Modal Components
@@ -24,6 +22,9 @@ export default function App() {
   const [lang, setLang] = useState<LanguageCode>('hi');
   const [activeTab, setActiveTab] = useState<'vda' | 'records' | 'facilities' | 'profile'>('vda');
 
+  // Backend VDA Session State
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
   // App Flow Modals
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isLogVitalOpen, setIsLogVitalOpen] = useState(false);
@@ -37,7 +38,36 @@ export default function App() {
   const [consents, setConsents] = useState(activeProfile.consents);
 
   // Clinical Escalation Takeover State
-  const [escalationState, setEscalationState] = useState<ClinicalEscalationState | null>(null);
+  const [clinicalReview, setClinicalReview] = useState<ClinicalReviewState | null>(null);
+  const [emergencyInstruction, setEmergencyInstruction] = useState('');
+
+  // Initialize Auth & Session on mount
+  React.useEffect(() => {
+    const initAppSession = async () => {
+      await apiService.initAuthToken();
+      const sessionRes = await apiService.createPatientSession(currentPersonaKey);
+      if (sessionRes?.session_id) {
+        setActiveSessionId(sessionRes.session_id);
+      }
+    };
+    initAppSession();
+  }, []);
+
+  // The backend owns the clinician deadline, fallback state, and connection state.
+  React.useEffect(() => {
+    if (!activeSessionId || !clinicalReview?.reviewRequested) return;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const next = await apiService.getClinicalReviewState(activeSessionId);
+        if (active) setClinicalReview(next);
+      } catch {
+        // Keep the last server-confirmed safety state visible; never replace it with mock data.
+      }
+    };
+    const interval = window.setInterval(() => void refresh(), 4_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [activeSessionId, clinicalReview?.reviewRequested]);
 
   // VDA Conversation History
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -60,8 +90,8 @@ export default function App() {
     }
   ]);
 
-  // Switch patient profile
-  const handleSwitchPersona = (key: string) => {
+  // Switch patient profile and create new session in backend
+  const handleSwitchPersona = async (key: string) => {
     setCurrentPersonaKey(key);
     const newProfile = SYNTHETIC_PATIENTS[key] || SYNTHETIC_PATIENTS['synth-patient-001'];
     setPatient(newProfile.demographics);
@@ -70,7 +100,16 @@ export default function App() {
     setObservations(newProfile.observations);
     setDocuments(newProfile.documents);
     setConsents(newProfile.consents);
-    setEscalationState(null);
+    setClinicalReview(null);
+    setEmergencyInstruction('');
+
+    // Call backend session creation API for selected patient
+    const sessionRes = await apiService.createPatientSession(key);
+    if (sessionRes?.session_id) {
+      setActiveSessionId(sessionRes.session_id);
+    } else {
+      setActiveSessionId(null);
+    }
 
     setMessages([
       {
@@ -106,9 +145,21 @@ export default function App() {
     );
   };
 
-  // Process user message
-  const handleSendMessage = async (userText: string) => {
+  // Process user message with optional prescription document attachment
+  const handleSendMessage = async (userText: string, attachmentFile?: File) => {
     playChime('start');
+
+    let attachmentInfo = undefined;
+    if (attachmentFile) {
+      const isImage = attachmentFile.type.startsWith('image/');
+      attachmentInfo = {
+        name: attachmentFile.name,
+        type: attachmentFile.type.split('/')[1]?.toUpperCase() || 'DOCUMENT',
+        url: isImage ? URL.createObjectURL(attachmentFile) : undefined,
+        isImage
+      };
+    }
+
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       sender: 'user',
@@ -116,91 +167,75 @@ export default function App() {
       textHi: userText,
       textTa: userText,
       textKn: userText,
+      attachment: attachmentInfo,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
     setMessages((prev) => [...prev, userMsg]);
 
-    const result = await apiService.processVdaQuery(userText, patient, medications, observations, lang);
-    setMessages((prev) => [...prev, result.message]);
+    // Ensure session exists and upload prescription attachment if attached
+    let currentSessionId = activeSessionId;
+    if (!currentSessionId) {
+      const sessionRes = await apiService.createPatientSession(currentPersonaKey);
+      if (sessionRes?.session_id) {
+        currentSessionId = sessionRes.session_id;
+        setActiveSessionId(currentSessionId);
+      }
+    }
 
-    if (result.escalationState) {
-      setEscalationState(result.escalationState);
-      apiService.notifyEscalation(result.escalationState).catch(console.error);
+    if (attachmentFile && currentSessionId) {
+      try {
+        await apiService.uploadPrescription(currentSessionId, attachmentFile);
+      } catch (err: any) {
+        console.warn('[VDA App] Prescription upload failed:', err);
+        const errMsg: ChatMessage = {
+          id: `upload-err-${Date.now()}`,
+          sender: 'vda',
+          agent: 'router',
+          text: `Prescription upload notice: ${err.message || 'Unable to upload file to backend.'}`,
+          textHi: `पर्ची अपलोड सूचना: ${err.message || 'फाइल सर्वर तक नहीं पहुँच पाई।'}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        setMessages((prev) => [...prev, errMsg]);
+      }
+    }
+
+    try {
+      const result = await apiService.processVdaQuery(userText, patient, medications, observations, lang, currentSessionId);
+      if (result.responseType !== 'clinical-review') setMessages((prev) => [...prev, result.message]);
+      if (currentSessionId && (result.escalationDetected || result.responseType === 'clinical-review')) {
+        const state = await apiService.getClinicalReviewState(currentSessionId);
+        setClinicalReview(state);
+        if (result.escalationDetected) {
+          setEmergencyInstruction(lang === 'hi' ? (result.message.textHi || result.message.text) : result.message.text);
+        }
+      }
+    } catch {
+      setMessages((prev) => [...prev, {
+        id: `backend-unavailable-${Date.now()}`,
+        sender: 'vda',
+        agent: 'router',
+        text: 'VDA service is unavailable. Please try again.',
+        textHi: 'VDA सेवा अभी उपलब्ध नहीं है। कृपया फिर प्रयास करें।',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }]);
     }
   };
 
   // Trigger manual or test escalation
-  const handleTriggerEscalation = (reason: string) => {
-    const escPayload = createEscalationPayload(
-      reason,
-      { isSafe: false, isEscalated: true, severity: 'CRITICAL', reason: 'High Risk Clinical Symptom' },
-      patient.name,
-      patient.abhaNumber
-    );
-    setEscalationState(escPayload);
-    apiService.notifyEscalation(escPayload).catch(console.error);
+  // The test control now sends the same input through the backend SafetyGate.
+  const handleTriggerEscalation = (reason: string) => { void handleSendMessage(reason); };
+
+  const handleClinicalMessage = async (text: string) => {
+    if (!activeSessionId) throw new Error('NO_ACTIVE_SESSION');
+    await apiService.processVdaQuery(text, patient, medications, observations, lang, activeSessionId);
+    setClinicalReview(await apiService.getClinicalReviewState(activeSessionId));
   };
 
-  // Doctor tele-consult response
-  const handleDoctorChatMessage = (text: string) => {
-    if (!escalationState) return;
-
-    const userMsg: ChatMessage = {
-      id: `esc-usr-${Date.now()}`,
-      sender: 'user',
-      text,
-      textHi: text,
-      textTa: text,
-      textKn: text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    setEscalationState((prev) => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        chatHistory: [...prev.chatHistory, userMsg]
-      };
-    });
-
-    // Simulated doctor response
-    setTimeout(() => {
-      const docReplies = [
-        {
-          text: `Understood, ${patient.name} ji. An emergency response team has been alerted at District Hospital. Keep breathing slowly and loosen any tight clothing. Do not take any extra painkiller pills.`,
-          textHi: `समझ गए, ${patient.name} जी। नजदीकी अस्पताल में इमरजेंसी टीम को सतर्क कर दिया गया है। गहरी सांस लेते रहें और कोई अन्य दर्द निवारक दवा न लें।`,
-          textTa: `புரிந்தது, ${patient.name} அவர்களே. மாவட்ட மருத்துவமனையில் அவசர சிகிச்சை குழு எச்சரிக்கப்பட்டுள்ளது. மெதுவாக சுவாசிக்கவும், வேறு வலி மாத்திரைகளை உட்கொள்ள வேண்டாம்.`,
-          textKn: `ತಿಳಿಯಿತು, ${patient.name} ಅವರೇ. ಜಿಲ್ಲಾ ಆಸ್ಪತ್ರೆಯಲ್ಲಿ ತುರ್ತು ಚಿಕಿತ್ಸಾ ತಂಡವನ್ನು ಎಚ್ಚರಿಸಲಾಗಿದೆ. ನಿಧಾನವಾಗಿ ಉಸಿರಾಡಿ, ಬೇರೆ ಯಾವುದೇ ನೋವು ನಿವಾರಕ ಮಾತ್ರೆ ತೆಗೆದುಕೊಳ್ಳಬೇಡಿ.`
-        },
-        {
-          text: `I am monitoring your vitals in real time. Please keep the phone near you. Help is on the way.`,
-          textHi: `मैं लगातार आपके रिकॉर्ड देख रही हूँ। फोन अपने पास रखें, सहायता पहुँच रही है।`,
-          textTa: `நான் உங்கள் பதிவுகளை நேரடியாக கவனித்து வருகிறேன். தொலைபேசியை அருகில் வைத்திருங்கள், உதவி வந்துகொண்டிருக்கிறது.`,
-          textKn: `ನಾನು ನಿಮ್ಮ ದಾಖಲೆಗಳನ್ನು ನೈಜ ಸಮಯದಲ್ಲಿ ವೀಕ್ಷಿಸುತ್ತಿದ್ದೇನೆ. ಫೋನ್ ನಿಮ್ಮ ಹತ್ತಿರವೇ ಇರಲಿ, ಸಹಾಯ ಬರುತ್ತಿದೆ.`
-        }
-      ];
-      const reply = docReplies[Math.floor(Math.random() * docReplies.length)];
-
-      const docMsg: ChatMessage = {
-        id: `esc-doc-${Date.now()}`,
-        sender: 'clinician',
-        text: reply.text,
-        textHi: reply.textHi,
-        textTa: reply.textTa,
-        textKn: reply.textKn,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        audioAvailable: true
-      };
-
-      setEscalationState((prev) => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          chatHistory: [...prev.chatHistory, docMsg]
-        };
-      });
-    }, 1200);
+  const openTeleconsultation = async () => {
+    if (!activeSessionId) throw new Error('NO_ACTIVE_SESSION');
+    await apiService.requestClinicalReviewTeleconsultation(activeSessionId);
+    await apiService.openEsanjeevani();
   };
 
   // Save new observation (e.g. self reported sugar/BP)
@@ -257,17 +292,13 @@ export default function App() {
         />
 
         {/* Clinical Escalation Full-Screen Takeover */}
-        {escalationState?.isActive && (
+        {clinicalReview?.reviewRequested && (
           <EscalationModal
-            escalation={escalationState}
-            patient={patient}
-            observations={observations}
+            review={clinicalReview}
+            emergencyInstruction={emergencyInstruction || (lang === 'hi' ? 'आपको तुरंत emergency medical care लेनी चाहिए।' : 'You should seek emergency medical care immediately.')}
             lang={lang}
-            onSendMessageToDoctor={handleDoctorChatMessage}
-            onResolveEscalation={() => {
-              playChime('success');
-              setEscalationState(null);
-            }}
+            onSendMessageToClinician={handleClinicalMessage}
+            onOpenTeleconsultation={openTeleconsultation}
           />
         )}
 

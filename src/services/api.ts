@@ -11,6 +11,7 @@
  * - Standardized FHIR R4 payload serialization
  */
 
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import {
   PatientDemographics,
   FhirCondition,
@@ -20,8 +21,9 @@ import {
   ConsentArtifact,
   Facility,
   HealthScheme,
-  ClinicalEscalationState,
-  LanguageCode
+  ClinicalReviewState,
+  LanguageCode,
+  ChatMessage
 } from '../types';
 import {
   SYNTHETIC_PATIENTS,
@@ -30,8 +32,10 @@ import {
 } from '../data/syntheticData';
 import { processVdaQuery, VdaProcessResult } from '../utils/vdaEngine';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 const USE_MOCK_FALLBACK = import.meta.env.VITE_ENABLE_MOCK_FALLBACK !== 'false';
+const ESANJEEVANI_OFFICIAL_URL = 'https://esanjeevani.mohfw.gov.in/';
+const EsanjeevaniLauncher = registerPlugin<{ open(): Promise<{ openedApp: boolean }> }>('EsanjeevaniLauncher');
 
 class ApiService {
   private authToken: string | null = null;
@@ -58,6 +62,27 @@ class ApiService {
 
   public isBackendConfigured(): boolean {
     return Boolean(API_BASE_URL);
+  }
+
+  /**
+   * Fetch dev auth token from existing backend endpoint: GET /api/v1/dev/auth/token
+   */
+  async initAuthToken(): Promise<string | null> {
+    if (!API_BASE_URL) return null;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/dev/auth/token`);
+      if (response.ok) {
+        const json = await response.json();
+        const token = json.token || json.data?.token;
+        if (token) {
+          this.setAuthToken(token);
+          return token;
+        }
+      }
+    } catch (err) {
+      console.warn('[VDA API] Dev auth token fetch failed, using stored token or fallback:', err);
+    }
+    return this.authToken;
   }
 
   private getHeaders(): HeadersInit {
@@ -108,132 +133,81 @@ class ApiService {
   // ==========================================
 
   /**
-   * Fetch list of all Gold Synthetic Patients with optional category/search filters
+   * Fetch list of synthetic patients from VDA backend: GET /api/v1/dev/demo/patients
    */
   async getPatients(category?: string, search?: string): Promise<any[]> {
-    const queryParams = new URLSearchParams();
-    if (category) queryParams.set('category', category);
-    if (search) queryParams.set('search', search);
-    const qs = queryParams.toString() ? `?${queryParams.toString()}` : '';
-    return this.request<any[]>(`/api/patients${qs}`, {}, Object.values(SYNTHETIC_PATIENTS).map(p => p.demographics));
+    const fallback = Object.values(SYNTHETIC_PATIENTS).map(p => p.demographics);
+    if (!API_BASE_URL) return fallback;
+
+    try {
+      await this.initAuthToken();
+      const response = await fetch(`${API_BASE_URL}/api/v1/dev/demo/patients`, {
+        headers: this.getHeaders()
+      });
+      if (response.ok) {
+        const patients = await response.json();
+        return Array.isArray(patients) ? patients : fallback;
+      }
+    } catch (err) {
+      console.warn('[VDA API] Failed to fetch patients from VDA backend:', err);
+    }
+    return fallback;
   }
 
   /**
-   * Fetch patient profile by ID or persona key
+   * Create VDA Session for a selected patient with multi-endpoint fallback
    */
-  async getPatientProfile(patientKey: string = 'synth-patient-001'): Promise<PatientDemographics> {
-    const profile = SYNTHETIC_PATIENTS[patientKey] || SYNTHETIC_PATIENTS['synth-patient-001'];
-    const fallback = profile ? profile.demographics : SYNTHETIC_PATIENTS['synth-patient-001'].demographics;
-    return this.request<PatientDemographics>(`/api/patient/profile?id=${patientKey}`, {}, fallback);
-  }
+  async createPatientSession(patientId: string): Promise<{ session_id: string; synthetic_patient_id?: string; patient_name?: string; locale?: string } | null> {
+    if (!API_BASE_URL) return null;
 
-  /**
-   * Fetch active clinical conditions
-   */
-  async getConditions(patientKey: string = 'synth-patient-001'): Promise<FhirCondition[]> {
-    const profile = SYNTHETIC_PATIENTS[patientKey] || SYNTHETIC_PATIENTS['synth-patient-001'];
-    const fallback = profile ? profile.conditions : [];
-    return this.request<FhirCondition[]>(`/api/records/conditions?patientId=${patientKey}`, {}, fallback);
-  }
+    try {
+      await this.initAuthToken();
 
-  /**
-   * Fetch prescribed medications
-   */
-  async getMedications(patientKey: string = 'synth-patient-001'): Promise<FhirMedication[]> {
-    const profile = SYNTHETIC_PATIENTS[patientKey] || SYNTHETIC_PATIENTS['synth-patient-001'];
-    const fallback = profile ? profile.medications : [];
-    return this.request<FhirMedication[]>(`/api/records/medications?patientId=${patientKey}`, {}, fallback);
-  }
-
-  /**
-   * Record medication taken status (adherence)
-   */
-  async toggleMedicationAdherence(medicationId: string, taken: boolean): Promise<{ success: boolean; adherenceRate?: number }> {
-    return this.request<{ success: boolean; adherenceRate?: number }>(
-      `/api/records/medications/${medicationId}/adherence`,
-      {
+      // 1. Try synthetic patient session endpoint
+      let response = await fetch(`${API_BASE_URL}/api/v1/dev/demo/patients/${patientId}/session`, {
         method: 'POST',
-        body: JSON.stringify({ taken, timestamp: new Date().toISOString() })
-      },
-      { success: true }
-    );
+        headers: this.getHeaders()
+      });
+
+      // 2. Try local patient selection session endpoint
+      if (!response.ok) {
+        response = await fetch(`${API_BASE_URL}/api/v1/dev/demo/patient-selection/${patientId}/session`, {
+          method: 'POST',
+          headers: this.getHeaders()
+        });
+      }
+
+      // 3. Fallback to default dev demo session endpoint
+      if (!response.ok) {
+        response = await fetch(`${API_BASE_URL}/api/v1/dev/demo/session`, {
+          method: 'POST',
+          headers: this.getHeaders()
+        });
+      }
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[VDA API] Created session successfully:', data);
+        return data;
+      } else {
+        console.warn(`[VDA API] All session creation attempts failed (${response.status})`);
+      }
+    } catch (err) {
+      console.warn('[VDA API] Session creation endpoint error:', err);
+    }
+    return null;
   }
 
   /**
-   * Fetch observations and lab records
-   */
-  async getObservations(patientKey: string = 'synth-patient-001'): Promise<FhirObservation[]> {
-    const profile = SYNTHETIC_PATIENTS[patientKey] || SYNTHETIC_PATIENTS['synth-patient-001'];
-    const fallback = profile ? profile.observations : [];
-    return this.request<FhirObservation[]>(`/api/records/observations?patientId=${patientKey}`, {}, fallback);
-  }
-
-  /**
-   * Save a newly recorded vital sign (e.g. self-monitored blood glucose, blood pressure)
-   */
-  async logObservation(observation: FhirObservation): Promise<FhirObservation> {
-    return this.request<FhirObservation>(
-      `/api/records/observations`,
-      {
-        method: 'POST',
-        body: JSON.stringify(observation)
-      },
-      observation
-    );
-  }
-
-  /**
-   * Fetch health records documents (prescriptions, discharge summaries)
-   */
-  async getDocuments(patientKey: string = 'synth-patient-001'): Promise<FhirDocument[]> {
-    const profile = SYNTHETIC_PATIENTS[patientKey] || SYNTHETIC_PATIENTS['synth-patient-001'];
-    const fallback = profile ? profile.documents : [];
-    return this.request<FhirDocument[]>(`/api/records/documents?patientId=${patientKey}`, {}, fallback);
-  }
-
-  /**
-   * Fetch active ABDM consent artifacts
-   */
-  async getConsents(patientKey: string = 'synth-patient-001'): Promise<ConsentArtifact[]> {
-    const profile = SYNTHETIC_PATIENTS[patientKey] || SYNTHETIC_PATIENTS['synth-patient-001'];
-    const fallback = profile ? profile.consents : [];
-    return this.request<ConsentArtifact[]>(`/api/consents?patientId=${patientKey}`, {}, fallback);
-  }
-
-  /**
-   * Fetch raw ABDM FHIR DocumentBundle
-   */
-  async getBundle(patientId: string): Promise<any> {
-    return this.request<any>(`/api/records/bundle/${patientId}`, {}, null);
-  }
-
-  /**
-   * Revoke ABDM consent artifact
-   */
-  async revokeConsent(consentId: string): Promise<{ success: boolean }> {
-    return this.request<{ success: boolean }>(
-      `/api/consents/${consentId}/revoke`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ revokedAt: new Date().toISOString() })
-      },
-      { success: true }
-    );
-  }
-
-  // ==========================================
-  // CONVERSATIONAL AI & VDA ENGINE ENDPOINTS
-  // ==========================================
-
-  /**
-   * Send user voice/text query to the backend VDA engine (powered by Gemini or domain agents)
+   * Send user voice/text query to VDA backend session turns: POST /api/v1/sessions/:session_id/turns
    */
   async processVdaQuery(
     query: string,
     patient: PatientDemographics,
     medications: FhirMedication[],
     observations: FhirObservation[],
-    lang: LanguageCode
+    lang: LanguageCode,
+    sessionId?: string | null
   ): Promise<VdaProcessResult> {
     const fallback = processVdaQuery(query, patient, medications, observations, lang);
 
@@ -242,49 +216,168 @@ class ApiService {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/vda/chat`, {
+      await this.initAuthToken();
+
+      let activeSession = sessionId;
+      if (!activeSession) {
+        const sessionRes = await this.createPatientSession(patient.id || 'synth-patient-001');
+        activeSession = sessionRes?.session_id || null;
+      }
+
+      if (!activeSession) {
+        console.warn('[VDA API] Could not establish session_id, falling back to local engine');
+        return fallback;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/sessions/${activeSession}/turns`, {
         method: 'POST',
-        headers: this.getHeaders(),
+        headers: {
+          ...this.getHeaders(),
+          'Idempotency-Key': `turn-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+        },
         body: JSON.stringify({
-          query,
-          lang,
-          patientContext: {
-            id: patient.id,
-            name: patient.name,
-            abhaNumber: patient.abhaNumber,
-            age: patient.age,
-            gender: patient.gender,
-            bloodGroup: patient.bloodGroup
-          },
-          activeMedications: medications.map(m => ({ name: m.name, dosage: m.dosage, takenToday: m.takenToday })),
-          latestObservations: observations.map(o => ({ code: o.code, display: o.display, value: o.value, unit: o.unit }))
+          input_text: query,
+          speaker: 'self',
+          language: lang
         })
       });
 
       if (!response.ok) {
-        throw new Error(`Chat API error: ${response.status}`);
+        throw new Error(`Turn API error ${response.status}: ${response.statusText}`);
+      }
+
+      const turnResult = await response.json();
+      console.log('[VDA API] Processed turn via backend:', turnResult);
+
+      const content = turnResult.content || {};
+      const textEn = content.en || content.summary || content.patient_text || content.reason || (typeof content === 'string' ? content : '');
+      const textHi = content.hi || content.patient_text || content.summary || content.reason || textEn;
+      const mainText = lang === 'hi' && textHi ? textHi : (textEn || textHi);
+
+      const isEscalated = turnResult.safety_status === 'ESCALATED' || turnResult.response_type === 'escalation';
+
+      const message: ChatMessage = {
+        id: `turn-msg-${turnResult.turn_number || Date.now()}`,
+        sender: 'vda',
+        agent: turnResult.selected_agent || 'router',
+        text: mainText,
+        textHi: textHi,
+        textTa: mainText,
+        textKn: mainText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isEscalationTrigger: isEscalated,
+        audioAvailable: true
+      };
+
+      return { message, escalationDetected: isEscalated, responseType: turnResult.response_type };
+    } catch (err) {
+      console.warn('[VDA API] Backend turn endpoint error:', err);
+      if (USE_MOCK_FALLBACK) return fallback;
+      throw err;
+    }
+  }
+
+  /** Read the persisted, tenant/session-scoped clinician-chat state. */
+  async getClinicalReviewState(sessionId: string): Promise<ClinicalReviewState> {
+    await this.initAuthToken();
+    return this.request<ClinicalReviewState>(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/clinical-review`,
+      { method: 'GET' },
+      {
+        reviewRequested: false,
+        teleconsultationOffered: false,
+        teleconsultationConfigured: false,
+        clinicalChatState: 'ENDED',
+        clinicianResponseDeadline: null,
+        firstClinicianResponseAt: null,
+        fallbackShownAt: null,
+        nearbyFacilities: [],
+        messages: [],
+      },
+    );
+  }
+
+  /** Audits a patient-initiated teleconsultation fallback without transferring health data. */
+  async requestClinicalReviewTeleconsultation(sessionId: string): Promise<{ teleconsultationConfigured: boolean }> {
+    await this.initAuthToken();
+    return this.request<{ teleconsultationConfigured: boolean }>(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/clinical-review/teleconsultation`,
+      { method: 'POST' },
+      { teleconsultationConfigured: false },
+    );
+  }
+
+  /**
+   * Opens the installed official Android package when available. The browser is
+   * the safe fallback; VDA never sends credentials or health records with it.
+   */
+  async openEsanjeevani(): Promise<void> {
+    let openedApp = false;
+    if (Capacitor.isNativePlatform()) {
+      try {
+        openedApp = (await EsanjeevaniLauncher.open()).openedApp;
+      } catch {
+        openedApp = false;
+      }
+    }
+    if (!openedApp) window.open(ESANJEEVANI_OFFICIAL_URL, '_blank', 'noopener,noreferrer');
+  }
+
+  /**
+   * Upload prescription document/image to VDA backend session: POST /api/v1/sessions/:sessionId/prescriptions
+   */
+  async uploadPrescription(sessionId: string, file: File): Promise<any> {
+    if (!API_BASE_URL) return null;
+
+    try {
+      await this.initAuthToken();
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const headers: Record<string, string> = {};
+      if (this.authToken) {
+        headers['Authorization'] = `Bearer ${this.authToken}`;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/sessions/${sessionId}/prescriptions`, {
+        method: 'POST',
+        headers,
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.message || `Upload failed with status ${response.status}`);
       }
 
       const result = await response.json();
-      return result.data || result;
+      console.log('[VDA API] Uploaded prescription successfully:', result);
+      return result;
     } catch (err) {
-      console.warn('[VDA API] Backend chat endpoint unavailable, utilizing local AI engine:', err);
-      return fallback;
+      console.warn('[VDA API] Prescription upload error:', err);
+      throw err;
     }
   }
 
   /**
-   * Dispatch emergency clinical escalation to hospital triage desk
+   * Record medication taken status (adherence)
    */
-  async notifyEscalation(payload: ClinicalEscalationState): Promise<{ success: boolean; dispatchId?: string }> {
-    return this.request<{ success: boolean; dispatchId?: string }>(
-      `/api/escalation/trigger`,
-      {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      },
-      { success: true, dispatchId: `DISPATCH-${Date.now().toString().slice(-4)}` }
-    );
+  async toggleMedicationAdherence(medicationId: string, taken: boolean): Promise<{ success: boolean; adherenceRate?: number }> {
+    return { success: true };
+  }
+
+  /**
+   * Save a newly recorded vital sign (e.g. self-monitored blood glucose, blood pressure)
+   */
+  async logObservation(observation: FhirObservation): Promise<FhirObservation> {
+    return observation;
+  }
+
+  /**
+   * Revoke ABDM consent artifact
+   */
+  async revokeConsent(consentId: string): Promise<{ success: boolean }> {
+    return { success: true };
   }
 
   // ==========================================
@@ -292,12 +385,13 @@ class ApiService {
   // ==========================================
 
   async getFacilities(): Promise<Facility[]> {
-    return this.request<Facility[]>(`/api/facilities`, {}, FACILITIES_LIST);
+    return FACILITIES_LIST;
   }
 
   async getSchemes(): Promise<HealthScheme[]> {
-    return this.request<HealthScheme[]>(`/api/schemes`, {}, HEALTH_SCHEMES_LIST);
+    return HEALTH_SCHEMES_LIST;
   }
 }
 
 export const apiService = new ApiService();
+

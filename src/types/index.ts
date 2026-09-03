@@ -246,25 +246,42 @@ export interface ChatMessage {
     titleKn?: string;
     details: Record<string, any>;
   };
+  attachment?: {
+    name: string;
+    type: string;
+    url?: string;
+    isImage: boolean;
+  };
   audioAvailable?: boolean;
 }
 
-export interface ClinicalEscalationState {
-  isActive: boolean;
-  escalationId: string;
-  reason: string;
-  severity: 'HIGH' | 'CRITICAL';
-  triggerSymptom: string;
-  timestamp: string;
-  assignedDoctor: {
-    name: string;
-    title: string;
-    facility: string;
-    avatarUrl?: string;
-    regNo: string;
-  };
-  chatHistory: ChatMessage[];
-  status: 'triage_in_progress' | 'connected_to_doctor' | 'ambulance_dispatched' | 'resolved';
+export type ClinicalChatState = 'WAITING_FOR_CLINICIAN' | 'CLINICIAN_CONNECTED' | 'ENDED';
+
+/** Server-authoritative patient view of a persisted clinical escalation. */
+export interface ClinicalReviewFacility {
+  name: string;
+  state: string | null;
+  district: string | null;
+  city: string | null;
+  address: string | null;
+  contactNumber: string | null;
+  hospitalType: string | null;
+  schemes: string[];
+  emergencyCapabilityVerified: boolean;
+  distanceKm: number | null;
+  travelTimeMinutes: number | null;
+}
+
+export interface ClinicalReviewState {
+  reviewRequested: boolean;
+  teleconsultationOffered: boolean;
+  teleconsultationConfigured: boolean;
+  clinicalChatState: ClinicalChatState;
+  clinicianResponseDeadline: string | null;
+  firstClinicianResponseAt: string | null;
+  fallbackShownAt: string | null;
+  nearbyFacilities: ClinicalReviewFacility[];
+  messages: Array<{ speaker: 'PATIENT' | 'CLINICIAN'; text: string; createdAt: string }>;
 }
 
 export interface VaccineRecord {

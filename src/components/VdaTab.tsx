@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, AlertTriangle, QrCode, ShieldAlert, Sparkles, CheckCircle2, Phone, ShieldCheck, ChevronDown, ChevronUp } from 'lucide-react';
+import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, AlertTriangle, QrCode, ShieldAlert, Sparkles, CheckCircle2, Phone, ShieldCheck, ChevronDown, ChevronUp, Paperclip, FileText, X } from 'lucide-react';
 import { ChatMessage, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from '../types';
 import { getTranslation, speakText, stopSpeaking, playChime, getLocalizedField } from '../utils/i18n';
 import { getChatMessageText, getQuickActionLabel, getCardTitle } from '../utils/vdaEngine';
@@ -10,7 +10,7 @@ interface VdaTabProps {
   observations: FhirObservation[];
   lang: LanguageCode;
   messages: ChatMessage[];
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string, file?: File) => void;
   onToggleMedicationTaken: (medId: string) => void;
   onNavigateTab: (tab: 'vda' | 'records' | 'facilities' | 'profile') => void;
   onTriggerEscalation: (reason: string) => void;
@@ -151,11 +151,54 @@ export const VdaTab: React.FC<VdaTabProps> = ({
     }
   };
 
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setAttachmentError(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type.toLowerCase())) {
+      setAttachmentError(lang === 'hi' ? 'केवल PDF, JPG या PNG पर्ची अपलोड कर सकते हैं।' : 'Please select a PDF, JPG, or PNG prescription document.');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setAttachmentError(lang === 'hi' ? 'फाइल का साइज़ 10MB से कम होना चाहिए।' : 'File size must be under 10MB.');
+      return;
+    }
+
+    setSelectedFile(file);
+    if (file.type.startsWith('image/')) {
+      const url = URL.createObjectURL(file);
+      setFilePreviewUrl(url);
+    } else {
+      setFilePreviewUrl(null);
+    }
+  };
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+    if (filePreviewUrl) {
+      URL.revokeObjectURL(filePreviewUrl);
+      setFilePreviewUrl(null);
+    }
+    setAttachmentError(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const handleSendText = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim()) return;
-    onSendMessage(inputText.trim());
+    if (!inputText.trim() && !selectedFile) return;
+    const textToSend = inputText.trim() || (selectedFile ? `[Prescription Attachment: ${selectedFile.name}]` : '');
+    onSendMessage(textToSend, selectedFile || undefined);
     setInputText('');
+    handleRemoveFile();
   };
 
   const handleSymptomClick = (symptomKey: string, symptomQuery: { hi: string; en: string; ta: string; kn: string }) => {
@@ -334,12 +377,12 @@ export const VdaTab: React.FC<VdaTabProps> = ({
             <span>SOS</span>
           </button>
 
-          {/* Test Safety Escalation Trigger Button */}
+          {/* Test the same backend SafetyGate path used by a patient message. */}
           <button
             id="trigger-test-safety-btn"
             onClick={() => onTriggerEscalation('Severe chest tightness and left arm numbness')}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 text-xs font-semibold transition-colors active:scale-95 whitespace-nowrap"
-            title="Simulate Safety Gate Clinical Escalation"
+            title="Test backend SafetyGate clinical escalation"
           >
             <AlertTriangle className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">{getTranslation(lang, 'safetyGateBadge')}</span>
@@ -475,6 +518,24 @@ export const VdaTab: React.FC<VdaTabProps> = ({
                     : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none shadow-sm'
                 }`}
               >
+                {msg.attachment && (
+                  <div className="mb-2 p-2 rounded-xl bg-slate-950/60 border border-slate-700/60 flex items-center gap-2">
+                    {msg.attachment.isImage && msg.attachment.url ? (
+                      <img src={msg.attachment.url} alt="Prescription" className="w-12 h-12 object-cover rounded-lg border border-slate-700" />
+                    ) : (
+                      <div className="w-9 h-9 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-slate-100 truncate">{msg.attachment.name}</p>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+                        {msg.attachment.type}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 <p className="whitespace-pre-line font-medium">
                   {displayMessageText}
                 </p>
@@ -659,18 +720,74 @@ export const VdaTab: React.FC<VdaTabProps> = ({
           </button>
         </div>
 
+        {/* Pending Attachment Preview Badge */}
+        {selectedFile && (
+          <div className="p-2 rounded-xl bg-slate-900 border border-emerald-500/40 flex items-center justify-between gap-2 shadow-lg animate-fadeIn">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {filePreviewUrl ? (
+                <img src={filePreviewUrl} alt="Preview" className="w-9 h-9 object-cover rounded-lg border border-slate-700" />
+              ) : (
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0">
+                  <FileText className="w-4 h-4" />
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-200 truncate">{selectedFile.name}</p>
+                <p className="text-[10px] text-slate-400">
+                  {(selectedFile.size / 1024).toFixed(1)} KB • {selectedFile.type.split('/')[1]?.toUpperCase()}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleRemoveFile}
+              className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-all"
+              title="Remove attachment"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {attachmentError && (
+          <div className="px-3 py-1.5 rounded-xl bg-red-950/80 border border-red-500/40 text-red-300 text-xs flex items-center justify-between">
+            <span>{attachmentError}</span>
+            <button onClick={() => setAttachmentError(null)} className="text-red-400 hover:text-white">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* Input Row & Hero Mic Button */}
         <div className="flex items-center gap-2">
+          {/* Hidden File Input */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileSelect}
+            accept="image/jpeg,image/png,image/webp,application/pdf"
+            className="hidden"
+          />
+
           {/* Secondary Text Input Box */}
-          <form onSubmit={handleSendText} className="flex-1 flex items-center gap-1 bg-slate-900/90 border border-slate-800 rounded-2xl px-3.5 py-2 focus-within:border-emerald-500/60 transition-all shadow-sm">
+          <form onSubmit={handleSendText} className="flex-1 flex items-center gap-1.5 bg-slate-900/90 border border-slate-800 rounded-2xl px-3.5 py-2 focus-within:border-emerald-500/60 transition-all shadow-sm">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="p-1 rounded-xl text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition-all flex-shrink-0"
+              title="Attach Prescription (PDF, JPG, PNG)"
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
+
             <input
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder={getTranslation(lang, 'typeMessagePlaceholder')}
+              placeholder={selectedFile ? `Ask about ${selectedFile.name}...` : getTranslation(lang, 'typeMessagePlaceholder')}
               className="flex-1 bg-transparent text-xs text-white placeholder:text-slate-500 focus:outline-none"
             />
-            {inputText.trim() && (
+            {(inputText.trim() || selectedFile) && (
               <button
                 type="submit"
                 className="p-1.5 rounded-xl bg-emerald-500 text-slate-950 hover:bg-emerald-400 transition-all"
