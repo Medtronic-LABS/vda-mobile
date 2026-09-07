@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, AlertTriangle, QrCode, ShieldAlert, Sparkles, CheckCircle2, Phone, ShieldCheck, ChevronDown, ChevronUp, Paperclip, FileText, X, LoaderCircle } from 'lucide-react';
+import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, AlertTriangle, QrCode, ShieldAlert, Sparkles, CheckCircle2, Phone, ShieldCheck, ChevronDown, ChevronUp, Paperclip, FileText, X } from 'lucide-react';
 import { ChatMessage, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from '../types';
 import { getTranslation, speakText, stopSpeaking, playChime, getLocalizedField } from '../utils/i18n';
 import { getChatMessageText, getQuickActionLabel, getCardTitle } from '../utils/vdaEngine';
@@ -10,7 +10,6 @@ interface VdaTabProps {
   observations: FhirObservation[];
   lang: LanguageCode;
   messages: ChatMessage[];
-  isProcessing: boolean;
   onSendMessage: (text: string, file?: File) => void;
   onToggleMedicationTaken: (medId: string) => void;
   onNavigateTab: (tab: 'vda' | 'records' | 'facilities' | 'profile') => void;
@@ -24,7 +23,6 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   observations,
   lang,
   messages,
-  isProcessing,
   onSendMessage,
   onToggleMedicationTaken,
   onNavigateTab,
@@ -40,25 +38,13 @@ export const VdaTab: React.FC<VdaTabProps> = ({
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const lastAutoSpokenMessageId = useRef<string | null>(messages[messages.length - 1]?.sender === 'vda' ? messages[messages.length - 1].id : null);
 
   // Auto-scroll chat to latest message
   useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
-  }, [messages, isListening, isProcessing]);
-
-  // Patient replies are voice-first: speak each newly received VDA response once.
-  // The button on the message remains available to replay or stop it.
-  useEffect(() => {
-    const latest = messages[messages.length - 1];
-    if (!latest || latest.sender === 'user' || latest.id === lastAutoSpokenMessageId.current) return;
-
-    lastAutoSpokenMessageId.current = latest.id;
-    setSpeakingMsgId(latest.id);
-    speakText(getChatMessageText(latest, lang), lang, () => setSpeakingMsgId(null));
-  }, [messages, lang]);
+  }, [messages, isListening]);
 
   // Initialize Web Speech API for voice assistant
   useEffect(() => {
@@ -698,16 +684,6 @@ export const VdaTab: React.FC<VdaTabProps> = ({
             </div>
           </div>
         )}
-
-        {isProcessing && (
-          <div className="flex max-w-[85%] items-center gap-2 rounded-2xl rounded-bl-none border border-emerald-500/30 bg-slate-900 px-3.5 py-3 text-xs text-emerald-100 shadow-sm" role="status" aria-live="polite">
-            <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-emerald-400" />
-            <div>
-              <p className="font-semibold">{lang === 'hi' ? 'VDA आपका प्रश्न समझ रहा है…' : lang === 'en' ? 'VDA is preparing your answer…' : getTranslation(lang, 'processing')}</p>
-              <p className="mt-0.5 text-[10px] text-slate-400">{lang === 'hi' ? 'कृपया एक क्षण प्रतीक्षा करें' : 'Please wait a moment'}</p>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Persistent Bottom Voice & Input Deck */}
@@ -716,32 +692,28 @@ export const VdaTab: React.FC<VdaTabProps> = ({
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none no-scrollbar">
           <button
             onClick={() => onSendMessage(getTranslation(lang, 'myMedicinesChip'))}
-            disabled={isProcessing}
-            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95 disabled:opacity-40"
+            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95"
           >
             <Pill className="w-3.5 h-3.5 text-blue-400" />
             <span>{getTranslation(lang, 'myMedicinesChip')}</span>
           </button>
           <button
             onClick={() => onSendMessage(getTranslation(lang, 'sugarLabChip'))}
-            disabled={isProcessing}
-            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95 disabled:opacity-40"
+            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95"
           >
             <Activity className="w-3.5 h-3.5 text-emerald-400" />
             <span>{getTranslation(lang, 'sugarLabChip')}</span>
           </button>
           <button
             onClick={() => onSendMessage(getTranslation(lang, 'nearbyHospitalChip'))}
-            disabled={isProcessing}
-            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95 disabled:opacity-40"
+            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95"
           >
             <Building2 className="w-3.5 h-3.5 text-amber-400" />
             <span>{getTranslation(lang, 'nearbyHospitalChip')}</span>
           </button>
           <button
             onClick={() => onSendMessage(getTranslation(lang, 'pmjayBenefitsChip'))}
-            disabled={isProcessing}
-            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95 disabled:opacity-40"
+            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95"
           >
             <Award className="w-3.5 h-3.5 text-purple-400" />
             <span>{getTranslation(lang, 'pmjayBenefitsChip')}</span>
@@ -802,7 +774,6 @@ export const VdaTab: React.FC<VdaTabProps> = ({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isProcessing}
               className="p-1 rounded-xl text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition-all flex-shrink-0"
               title="Attach Prescription (PDF, JPG, PNG)"
             >
@@ -813,14 +784,12 @@ export const VdaTab: React.FC<VdaTabProps> = ({
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              disabled={isProcessing}
               placeholder={selectedFile ? `Ask about ${selectedFile.name}...` : getTranslation(lang, 'typeMessagePlaceholder')}
               className="flex-1 bg-transparent text-xs text-white placeholder:text-slate-500 focus:outline-none"
             />
             {(inputText.trim() || selectedFile) && (
               <button
                 type="submit"
-                disabled={isProcessing}
                 className="p-1.5 rounded-xl bg-emerald-500 text-slate-950 hover:bg-emerald-400 transition-all"
               >
                 <Send className="w-3.5 h-3.5" />
@@ -832,11 +801,10 @@ export const VdaTab: React.FC<VdaTabProps> = ({
           <button
             id="vda-hero-mic-btn"
             onClick={handleToggleListening}
-            disabled={isProcessing}
             className={`relative flex-shrink-0 flex items-center justify-center w-11 h-11 sm:w-12 sm:h-12 rounded-2xl transition-all shadow-xl active:scale-95 ${
               isListening
                 ? 'bg-red-500 text-white ring-4 ring-red-500/40 shadow-red-950 animate-pulse'
-                : 'bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 hover:from-emerald-400 hover:to-teal-300 shadow-emerald-950/60 ring-2 ring-emerald-400/30 disabled:opacity-40'
+                : 'bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 hover:from-emerald-400 hover:to-teal-300 shadow-emerald-950/60 ring-2 ring-emerald-400/30'
             }`}
             title="Tap to speak with VDA Voice Assistant"
           >

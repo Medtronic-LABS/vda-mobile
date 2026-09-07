@@ -29,7 +29,7 @@ const CRITICAL_SYMPTOM_PATTERNS = [
   },
   {
     category: 'RESPIRATORY' as const,
-    regex: /(cannot breathe|severe breathlessness|gasping for air|सांस फूलना|सांस नहीं आ रही|दम घुटना|மூச்சுத்திணறல்|ಉಸಿರಾಟದ ತೊಂದರೆ)/i,
+    regex: /(cannot breathe|severe breathlessness|gasping for air|सांस फूल|सांस नहीं आ रही|दम घुटना|மூச்சுத்திணறல்|ಉಸಿರಾಟದ ತೊಂದರೆ)/i,
     reason: 'Acute Severe Respiratory Distress',
     reasonHi: 'गंभीर सांस की तकलीफ / श्वसन संकट',
     action: 'Oxygen support needed urgently at nearest PHC/Hospital'
