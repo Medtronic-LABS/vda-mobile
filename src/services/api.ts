@@ -288,6 +288,62 @@ class ApiService {
     }
   }
 
+  /** Uploads patient-recorded audio to the authenticated backend STT boundary. */
+  async transcribeVoice(
+    audio: Blob,
+    lang: LanguageCode,
+    durationMs?: number,
+  ): Promise<{ transcript: string; provider: string; fallbackUsed: boolean; detectedLanguage?: string }> {
+    await this.initAuthToken();
+    const form = new FormData();
+    // Preserve the MediaRecorder container in multipart metadata. The backend
+    // validates the MIME type and normalizes accepted audio with FFmpeg.
+    const mimeType = (audio.type || 'audio/webm').split(';', 1)[0].toLowerCase();
+    const extension = mimeType === 'audio/mp4' || mimeType === 'audio/x-m4a'
+      ? '.m4a'
+      : mimeType === 'audio/mpeg'
+        ? '.mp3'
+        : mimeType === 'audio/ogg'
+          ? '.ogg'
+          : mimeType === 'audio/wav' || mimeType === 'audio/x-wav'
+            ? '.wav'
+            : '.webm';
+    form.append('audio', audio, `vda-recording${extension}`);
+    form.append('language_code', this.voiceLanguageCode(lang));
+    if (durationMs !== undefined) form.append('duration_ms', String(durationMs));
+    const headers = this.getHeaders() as Record<string, string>;
+    delete headers['Content-Type'];
+    const response = await fetch(`${API_BASE_URL}/api/v1/voice/stt`, {
+      method: 'POST',
+      headers,
+      body: form,
+    });
+    if (!response.ok) throw new Error(`Voice STT error ${response.status}`);
+    return response.json();
+  }
+
+  /** Requests Sarvam-generated playback for final patient-facing response text. */
+  async synthesizeVoice(text: string, lang: LanguageCode): Promise<Blob> {
+    await this.initAuthToken();
+    const response = await fetch(`${API_BASE_URL}/api/v1/voice/tts`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ text, language_code: this.voiceLanguageCode(lang) }),
+    });
+    if (!response.ok) throw new Error(`Voice TTS error ${response.status}`);
+    return response.blob();
+  }
+
+  private voiceLanguageCode(lang: LanguageCode): string {
+    const languages: Record<LanguageCode, string> = {
+      hi: 'hi-IN',
+      en: 'en-IN',
+      ta: 'ta-IN',
+      kn: 'kn-IN',
+    };
+    return languages[lang];
+  }
+
   /** Read the persisted, tenant/session-scoped clinician-chat state. */
   async getClinicalReviewState(sessionId: string): Promise<ClinicalReviewState> {
     await this.initAuthToken();

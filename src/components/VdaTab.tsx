@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, AlertTriangle, QrCode, ShieldAlert, Sparkles, CheckCircle2, Phone, ShieldCheck, ChevronDown, ChevronUp, Paperclip, FileText, X, LoaderCircle } from 'lucide-react';
 import { ChatMessage, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from '../types';
-import { getTranslation, speakText, stopSpeaking, playChime, getLocalizedField } from '../utils/i18n';
+import { getTranslation, playChime, getLocalizedField } from '../utils/i18n';
 import { getChatMessageText, getQuickActionLabel, getCardTitle } from '../utils/vdaEngine';
+import { apiService } from '../services/api';
 
 interface VdaTabProps {
   patient: PatientDemographics;
@@ -32,14 +33,20 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   onOpenLogVital
 }) => {
   const [inputText, setInputText] = useState('');
-  const [isListening, setIsListening] = useState(false);
+  const [voiceState, setVoiceState] = useState<'idle' | 'recording' | 'transcribing' | 'auto_sending' | 'waiting_for_vda' | 'error'>('idle');
   const [speechTranscript, setSpeechTranscript] = useState('');
+  const [voiceError, setVoiceError] = useState('');
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [showSymptomGrid, setShowSymptomGrid] = useState(false);
   const [showEmergencyDial, setShowEmergencyDial] = useState(false);
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const recordingCancelledRef = useRef(false);
+  const voiceAutoSendRef = useRef(false);
+  const voiceTurnStartedRef = useRef(false);
+  const playbackRef = useRef<HTMLAudioElement | null>(null);
   const lastAutoSpokenMessageId = useRef<string | null>(messages[messages.length - 1]?.sender === 'vda' ? messages[messages.length - 1].id : null);
 
   // Auto-scroll chat to latest message
@@ -47,123 +54,147 @@ export const VdaTab: React.FC<VdaTabProps> = ({
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
-  }, [messages, isListening, isProcessing]);
+  }, [messages, voiceState, isProcessing]);
 
-  // Patient replies are voice-first: speak each newly received VDA response once.
-  // The button on the message remains available to replay or stop it.
+  // Voice uses the same parent-owned turn lifecycle as typed text. Keep the
+  // controls locked until that existing turn finishes.
+  useEffect(() => {
+    if (voiceState !== 'waiting_for_vda') return;
+    if (isProcessing) {
+      voiceTurnStartedRef.current = true;
+      return;
+    }
+    if (voiceTurnStartedRef.current) {
+      voiceTurnStartedRef.current = false;
+      voiceAutoSendRef.current = false;
+      setSpeechTranscript('');
+      setVoiceState('idle');
+    }
+  }, [isProcessing, voiceState]);
+
+  // Patient replies are voice-first through the authenticated backend Sarvam TTS endpoint.
   useEffect(() => {
     const latest = messages[messages.length - 1];
     if (!latest || latest.sender === 'user' || latest.id === lastAutoSpokenMessageId.current) return;
 
     lastAutoSpokenMessageId.current = latest.id;
-    setSpeakingMsgId(latest.id);
-    speakText(getChatMessageText(latest, lang), lang, () => setSpeakingMsgId(null));
+    void playResponseAudio(latest);
   }, [messages, lang]);
 
-  // Initialize Web Speech API for voice assistant
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition =
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  useEffect(() => () => {
+    recordingCancelledRef.current = true;
+    recorderRef.current?.stop();
+    playbackRef.current?.pause();
+  }, []);
 
-      if (SpeechRecognition) {
-        const recognition = new SpeechRecognition();
-        recognition.continuous = false;
-        recognition.interimResults = true;
-
-        const langMap: Record<LanguageCode, string> = {
-          hi: 'hi-IN',
-          en: 'en-IN',
-          ta: 'ta-IN',
-          kn: 'kn-IN'
-        };
-        recognition.lang = langMap[lang] || 'hi-IN';
-
-        recognition.onstart = () => {
-          setIsListening(true);
-          playChime('start');
-        };
-
-        recognition.onresult = (event: any) => {
-          const current = event.resultIndex;
-          const transcript = event.results[current][0].transcript;
-          setSpeechTranscript(transcript);
-
-          if (event.results[current].isFinal) {
-            onSendMessage(transcript);
-            setIsListening(false);
-            setSpeechTranscript('');
-            playChime('success');
-          }
-        };
-
-        recognition.onerror = () => {
-          setIsListening(false);
-          setSpeechTranscript('');
-          playChime('stop');
-        };
-
-        recognition.onend = () => {
-          setIsListening(false);
-        };
-
-        recognitionRef.current = recognition;
-      }
-    }
-
-    return () => {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.abort();
-        } catch {
-          // ignore
-        }
-      }
-      stopSpeaking();
-    };
-  }, [lang, onSendMessage]);
-
-  const handleToggleListening = () => {
-    if (!recognitionRef.current) {
-      // Fallback if browser speech synthesis or mic is unavailable in iframe
-      const sampleQueries = {
-        hi: ['मेरी आज की दवाइयों का समय बताएं', 'मेरी शुगर रिपोर्ट कैसी है?', 'नजदीकी सरकारी अस्पताल कहां है?', 'आयुष्मान योजना के क्या लाभ हैं?'],
-        en: ['What is my medication schedule today?', 'Explain my blood sugar lab report', 'Where is the nearest ABDM hospital?', 'What are my Ayushman PM-JAY benefits?'],
-        ta: ['இன்றைய எனது மருந்து அட்டவணை என்ன?', 'எனது சர்க்கரை பரிசோதனை அறிக்கையை விளக்குங்கள்', 'அருகிலுள்ள அரசு மருத்துவமனை எங்கே?', 'ஆயுஷ்மான் திட்ட நன்மைகள் என்ன?'],
-        kn: ['ಇಂದಿನ ನನ್ನ ಔಷಧಿಗಳ ವೇಳಾಪಟ್ಟಿ ಏನು?', 'ನನ್ನ ಸಕ್ಕರೆ ಪರೀಕ್ಷೆಯ ವರದಿಯನ್ನು ವಿವರಿಸಿ', 'ಹತ್ತಿರದ ಸರ್ಕಾರಿ ಆಸ್ಪತ್ರೆ ಎಲ್ಲಿದೆ?', 'ಆಯುಷ್ಮಾನ್ ಯೋಜನೆಯ ಪ್ರಯೋಜನಗಳೇನು?']
-      };
-      const queries = sampleQueries[lang] || sampleQueries.en;
-      const randomQuery = queries[Math.floor(Math.random() * queries.length)];
-      onSendMessage(randomQuery);
+  const playResponseAudio = async (msg: ChatMessage) => {
+    if (speakingMsgId === msg.id) {
+      playbackRef.current?.pause();
+      setSpeakingMsgId(null);
       return;
     }
-
-    if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-      playChime('stop');
-    } else {
-      try {
-        recognitionRef.current.start();
-      } catch {
-        recognitionRef.current.stop();
-        setTimeout(() => recognitionRef.current.start(), 200);
-      }
-    }
-  };
-
-  const handleSpeakMessage = (msg: ChatMessage) => {
-    if (speakingMsgId === msg.id) {
-      stopSpeaking();
-      setSpeakingMsgId(null);
-    } else {
+    const textToSpeak = getChatMessageText(msg, lang).trim();
+    if (!textToSpeak) return;
+    try {
+      playbackRef.current?.pause();
       setSpeakingMsgId(msg.id);
-      const textToSpeak = getChatMessageText(msg, lang);
-      speakText(textToSpeak, lang, () => {
+      const audioBlob = await apiService.synthesizeVoice(textToSpeak.slice(0, 2500), lang);
+      const url = URL.createObjectURL(audioBlob);
+      const player = new Audio(url);
+      player.onended = () => {
+        URL.revokeObjectURL(url);
         setSpeakingMsgId(null);
-      });
+      };
+      playbackRef.current = player;
+      await player.play();
+    } catch {
+      // Text remains usable; device speech is not a silent fallback.
+      setSpeakingMsgId(null);
+      setVoiceError(lang === 'hi' ? 'आवाज़ चलाने में समस्या हुई। आप उत्तर पढ़ सकते हैं।' : 'Voice playback is unavailable. You can still read the response.');
     }
   };
+
+  const stopRecording = (cancel = false) => {
+    if (!recorderRef.current) return;
+    recordingCancelledRef.current = cancel;
+    recorderRef.current.stop();
+  };
+
+  const startRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setVoiceState('error');
+      setVoiceError(lang === 'hi' ? 'इस डिवाइस पर रिकॉर्डिंग उपलब्ध नहीं है। कृपया लिखकर पूछें।' : 'Recording is unavailable on this device. Please type your question.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        recorderRef.current = null;
+        if (recordingCancelledRef.current) {
+          recordingCancelledRef.current = false;
+          recordingStartedAtRef.current = null;
+          setVoiceState('idle');
+          return;
+        }
+        const durationMs = recordingStartedAtRef.current ? Date.now() - recordingStartedAtRef.current : undefined;
+        recordingStartedAtRef.current = null;
+        if (chunks.length === 0) {
+          setVoiceState('error');
+          setVoiceError(lang === 'hi' ? 'कोई आवाज़ रिकॉर्ड नहीं हुई। कृपया फिर से बोलें।' : 'No audio was recorded. Please try again.');
+          return;
+        }
+        setVoiceState('transcribing');
+        try {
+          const audio = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+          const result = await apiService.transcribeVoice(audio, lang, durationMs);
+          const transcript = result.transcript.trim();
+          if (!transcript) throw new Error('Voice transcription returned no text.');
+          if (voiceAutoSendRef.current) return;
+          voiceAutoSendRef.current = true;
+          voiceTurnStartedRef.current = false;
+          // Render the exact transcript, then submit it directly through the
+          // existing text-turn callback instead of relying on async state.
+          setInputText(transcript);
+          setSpeechTranscript(transcript);
+          setVoiceError('');
+          setVoiceState('auto_sending');
+          playChime('success');
+          requestAnimationFrame(() => {
+            onSendMessage(transcript);
+            setInputText('');
+            setVoiceState('waiting_for_vda');
+          });
+        } catch {
+          voiceAutoSendRef.current = false;
+          setVoiceState('error');
+          setVoiceError(lang === 'hi' ? 'आवाज़ समझी नहीं जा सकी। कृपया लिखकर पूछें या फिर से बोलें।' : 'Your voice could not be understood. Please type your question or try again.');
+          playChime('stop');
+        }
+      };
+      recorderRef.current = recorder;
+      recordingStartedAtRef.current = Date.now();
+      recordingCancelledRef.current = false;
+      setVoiceError('');
+      setSpeechTranscript('');
+      setVoiceState('recording');
+      recorder.start();
+      playChime('start');
+    } catch {
+      setVoiceState('error');
+      setVoiceError(lang === 'hi' ? 'माइक्रोफोन अनुमति नहीं मिली। कृपया लिखकर पूछें।' : 'Microphone permission was not granted. Please type your question.');
+    }
+  };
+
+  const handleToggleListening = () => {
+    if (voiceState === 'recording') stopRecording();
+    else if (voiceState === 'idle' || voiceState === 'error') void startRecording();
+  };
+
+  const handleSpeakMessage = (msg: ChatMessage) => { void playResponseAudio(msg); };
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
@@ -212,13 +243,18 @@ export const VdaTab: React.FC<VdaTabProps> = ({
     const textToSend = inputText.trim() || (selectedFile ? `[Prescription Attachment: ${selectedFile.name}]` : '');
     onSendMessage(textToSend, selectedFile || undefined);
     setInputText('');
+    setSpeechTranscript('');
+    setVoiceState('idle');
     handleRemoveFile();
   };
+
+  const voiceInteractionBusy = voiceState === 'transcribing'
+    || voiceState === 'auto_sending'
+    || voiceState === 'waiting_for_vda';
 
   const handleSymptomClick = (symptomKey: string, symptomQuery: { hi: string; en: string; ta: string; kn: string }) => {
     playChime('start');
     const queryText = symptomQuery[lang] || symptomQuery.en;
-    speakText(queryText, lang);
     onSendMessage(queryText);
     setShowSymptomGrid(false);
   };
@@ -688,15 +724,41 @@ export const VdaTab: React.FC<VdaTabProps> = ({
           );
         })}
 
-        {/* Live Speech Recognition Transcript Floating Bubble */}
-        {isListening && (
+        {/* Backend-mediated audio capture status. No transcript is fabricated. */}
+        {voiceState === 'recording' && (
           <div className="p-3 rounded-2xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-200 text-xs animate-pulse flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
             <div className="flex-1">
               <span className="font-semibold">{getTranslation(lang, 'listening')}</span>
-              <p className="text-white font-medium mt-0.5">{speechTranscript || '...'}</p>
+              <p className="text-white font-medium mt-0.5">{lang === 'hi' ? 'बोलना समाप्त होने पर माइक्रोफोन दबाएं।' : 'Tap the microphone again when you finish speaking.'}</p>
             </div>
+            <button type="button" onClick={() => stopRecording(true)} className="text-[11px] font-semibold text-emerald-100 underline">{lang === 'hi' ? 'रद्द करें' : 'Cancel'}</button>
           </div>
+        )}
+
+        {voiceState === 'transcribing' && (
+          <div className="p-3 rounded-2xl bg-slate-900 border border-emerald-500/40 text-emerald-100 text-xs flex items-center gap-2" role="status">
+            <LoaderCircle className="h-4 w-4 animate-spin text-emerald-400" />
+            <span className="font-semibold">{lang === 'hi' ? 'आवाज़ समझी जा रही है…' : 'Transcribing your voice…'}</span>
+          </div>
+        )}
+
+        {(voiceState === 'auto_sending' || voiceState === 'waiting_for_vda') && speechTranscript && (
+          <div className="p-3 rounded-2xl bg-slate-900 border border-emerald-500/30 text-emerald-100 text-xs">
+            <span className="font-semibold">{lang === 'hi' ? 'आपका प्रश्न भेजा जा रहा है:' : 'Sending your voice question:'}</span>
+            <p className="mt-1 text-slate-300">{speechTranscript}</p>
+          </div>
+        )}
+
+        {voiceState === 'auto_sending' && (
+          <div className="p-3 rounded-2xl bg-slate-900 border border-emerald-500/40 text-emerald-100 text-xs flex items-center gap-2" role="status">
+            <LoaderCircle className="h-4 w-4 animate-spin text-emerald-400" />
+            <span className="font-semibold">{lang === 'hi' ? 'प्रश्न VDA को भेजा जा रहा है…' : 'Sending your question to VDA…'}</span>
+          </div>
+        )}
+
+        {voiceState === 'error' && voiceError && (
+          <div className="p-3 rounded-2xl bg-red-950/60 border border-red-500/40 text-red-100 text-xs" role="status">{voiceError}</div>
         )}
 
         {isProcessing && (
@@ -716,7 +778,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none no-scrollbar">
           <button
             onClick={() => onSendMessage(getTranslation(lang, 'myMedicinesChip'))}
-            disabled={isProcessing}
+            disabled={isProcessing || voiceInteractionBusy}
             className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95 disabled:opacity-40"
           >
             <Pill className="w-3.5 h-3.5 text-blue-400" />
@@ -724,7 +786,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
           </button>
           <button
             onClick={() => onSendMessage(getTranslation(lang, 'sugarLabChip'))}
-            disabled={isProcessing}
+            disabled={isProcessing || voiceInteractionBusy}
             className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95 disabled:opacity-40"
           >
             <Activity className="w-3.5 h-3.5 text-emerald-400" />
@@ -732,7 +794,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
           </button>
           <button
             onClick={() => onSendMessage(getTranslation(lang, 'nearbyHospitalChip'))}
-            disabled={isProcessing}
+            disabled={isProcessing || voiceInteractionBusy}
             className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95 disabled:opacity-40"
           >
             <Building2 className="w-3.5 h-3.5 text-amber-400" />
@@ -740,7 +802,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
           </button>
           <button
             onClick={() => onSendMessage(getTranslation(lang, 'pmjayBenefitsChip'))}
-            disabled={isProcessing}
+            disabled={isProcessing || voiceInteractionBusy}
             className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95 disabled:opacity-40"
           >
             <Award className="w-3.5 h-3.5 text-purple-400" />
@@ -802,7 +864,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isProcessing}
+              disabled={isProcessing || voiceInteractionBusy}
               className="p-1 rounded-xl text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition-all flex-shrink-0"
               title="Attach Prescription (PDF, JPG, PNG)"
             >
@@ -813,14 +875,14 @@ export const VdaTab: React.FC<VdaTabProps> = ({
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              disabled={isProcessing}
+              disabled={isProcessing || voiceInteractionBusy}
               placeholder={selectedFile ? `Ask about ${selectedFile.name}...` : getTranslation(lang, 'typeMessagePlaceholder')}
               className="flex-1 bg-transparent text-xs text-white placeholder:text-slate-500 focus:outline-none"
             />
             {(inputText.trim() || selectedFile) && (
               <button
                 type="submit"
-                disabled={isProcessing}
+                disabled={isProcessing || voiceInteractionBusy}
                 className="p-1.5 rounded-xl bg-emerald-500 text-slate-950 hover:bg-emerald-400 transition-all"
               >
                 <Send className="w-3.5 h-3.5" />
@@ -832,22 +894,22 @@ export const VdaTab: React.FC<VdaTabProps> = ({
           <button
             id="vda-hero-mic-btn"
             onClick={handleToggleListening}
-            disabled={isProcessing}
+            disabled={isProcessing || voiceInteractionBusy}
             className={`relative flex-shrink-0 flex items-center justify-center w-11 h-11 sm:w-12 sm:h-12 rounded-2xl transition-all shadow-xl active:scale-95 ${
-              isListening
+              voiceState === 'recording'
                 ? 'bg-red-500 text-white ring-4 ring-red-500/40 shadow-red-950 animate-pulse'
                 : 'bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 hover:from-emerald-400 hover:to-teal-300 shadow-emerald-950/60 ring-2 ring-emerald-400/30 disabled:opacity-40'
             }`}
             title="Tap to speak with VDA Voice Assistant"
           >
-            {isListening ? (
+            {voiceState === 'recording' ? (
               <MicOff className="w-5 h-5 sm:w-6 sm:h-6" />
             ) : (
               <Mic className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.5]" />
             )}
 
             {/* Pulsing Voice Waves Ring */}
-            {isListening && (
+            {voiceState === 'recording' && (
               <span className="absolute -inset-1 rounded-2xl border-2 border-red-400 animate-ping opacity-75 pointer-events-none" />
             )}
           </button>
