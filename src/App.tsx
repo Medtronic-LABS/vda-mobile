@@ -70,6 +70,7 @@ export default function App() {
   }, [activeSessionId, clinicalReview?.reviewRequested]);
 
   // VDA Conversation History
+  const [isProcessingMessage, setIsProcessingMessage] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome-01',
@@ -147,7 +148,9 @@ export default function App() {
 
   // Process user message with optional prescription document attachment
   const handleSendMessage = async (userText: string, attachmentFile?: File) => {
+    if (isProcessingMessage) return;
     playChime('start');
+    setIsProcessingMessage(true);
 
     let attachmentInfo = undefined;
     if (attachmentFile) {
@@ -219,6 +222,8 @@ export default function App() {
         textHi: 'VDA सेवा अभी उपलब्ध नहीं है। कृपया फिर प्रयास करें।',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       }]);
+    } finally {
+      setIsProcessingMessage(false);
     }
   };
 
@@ -311,6 +316,7 @@ export default function App() {
               observations={observations}
               lang={lang}
               messages={messages}
+              isProcessing={isProcessingMessage}
               onSendMessage={handleSendMessage}
               onToggleMedicationTaken={handleToggleMedication}
               onNavigateTab={setActiveTab}
