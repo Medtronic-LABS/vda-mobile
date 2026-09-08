@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, AlertTriangle, QrCode, ShieldAlert, Sparkles, CheckCircle2, Phone, ShieldCheck, ChevronDown, ChevronUp, Paperclip, FileText, X, LoaderCircle } from 'lucide-react';
+import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, AlertTriangle, QrCode, ShieldAlert, Sparkles, CheckCircle2, Phone, ShieldCheck, ChevronDown, ChevronUp, Paperclip, FileText, X } from 'lucide-react';
 import { ChatMessage, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from '../types';
 import { getTranslation, playChime, getLocalizedField } from '../utils/i18n';
 import { getChatMessageText, getQuickActionLabel, getCardTitle } from '../utils/vdaEngine';
@@ -11,7 +11,6 @@ interface VdaTabProps {
   observations: FhirObservation[];
   lang: LanguageCode;
   messages: ChatMessage[];
-  isProcessing: boolean;
   onSendMessage: (text: string, file?: File) => void;
   onToggleMedicationTaken: (medId: string) => void;
   onNavigateTab: (tab: 'vda' | 'records' | 'facilities' | 'profile') => void;
@@ -25,7 +24,6 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   observations,
   lang,
   messages,
-  isProcessing,
   onSendMessage,
   onToggleMedicationTaken,
   onNavigateTab,
@@ -898,7 +896,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
             className={`relative flex-shrink-0 flex items-center justify-center w-11 h-11 sm:w-12 sm:h-12 rounded-2xl transition-all shadow-xl active:scale-95 ${
               voiceState === 'recording'
                 ? 'bg-red-500 text-white ring-4 ring-red-500/40 shadow-red-950 animate-pulse'
-                : 'bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 hover:from-emerald-400 hover:to-teal-300 shadow-emerald-950/60 ring-2 ring-emerald-400/30 disabled:opacity-40'
+                : 'bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 hover:from-emerald-400 hover:to-teal-300 shadow-emerald-950/60 ring-2 ring-emerald-400/30'
             }`}
             title="Tap to speak with VDA Voice Assistant"
           >

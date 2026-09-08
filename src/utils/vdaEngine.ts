@@ -60,7 +60,7 @@ export function processVdaQuery(
   }
 
   // 2. Intent Routing across Domain Agents
-  let agent: AgentDomain = 'router';
+  let agent: AgentDomain = 'triage';
   let replyText = '';
   let replyTextHi = '';
   let replyTextTa = '';
@@ -79,7 +79,7 @@ export function processVdaQuery(
       replyTextKn = `ನಮಸ್ಕಾರ ${patient.name} ಅವರೇ! ಇಂದು ನಿಮಗೆ ${untaken.length} ಔಷಧಿ ಬಾಕಿ ಇದೆ: ${untaken.map(m => m.nameKn || m.name).join(', ')}. ದಯವಿಟ್ಟು ಸಮಯಕ್ಕೆ ಸರಿಯಾಗಿ ಔಷಧಿ ತೆಗೆದುಕೊಳ್ಳಿ.`;
     } else {
       replyText = `Great job! You have taken all your prescribed medicines today. Your medication adherence is currently at 94%. Next dose is scheduled for tomorrow.`;
-      replyTextHi = `बहुत बढ़िया! आपने आज की सभी दवाइयां समय पर ले ली हैं। आपका दवा अनुशासन 94% है। अगली खुराक कल है।`;
+      replyTextHi = `बहुत बढ़िया! आपने आज की सभी दवाइयां समय पर ले ली हैं। आपका दवा अनुशासन 94% है। अगली खुराक कल है।`;
       replyTextTa = `மிக நன்று! இன்றைய அனைத்து மருந்துகளையும் சரியாக உட்கொண்டுள்ளீர்கள். மருந்து ஒழுங்குமுறை 94%. அடுத்த டோஸ் நாளை.`;
       replyTextKn = `ತುಂಬಾ ಒಳ್ಳೆಯದು! ನೀವು ಇಂದಿನ ಎಲ್ಲಾ ಔಷಧಿಗಳನ್ನು ಸಮಯಕ್ಕೆ ತೆಗೆದುಕೊಂಡಿದ್ದೀರಿ. ಔಷಧಿ ಶಿಸ್ತು 94% ಆಗಿದೆ. ಮುಂದಿನ ಡೋಸ್ ನಾಳೆ.`;
     }
@@ -99,7 +99,7 @@ export function processVdaQuery(
     ];
   }
   // Lab / Observation Intent
-  else if (/sugar|शुगर|சர்க்கரை|ಸಕ್ಕರೆ|hba1c|blood pressure|bp|ரத்த அழுத்தம்|ರಕ್ತದೊತ್ತಡ|रिपोर्ट|lab|test|जांच|creatinine|report/i.test(normalized)) {
+  else if (/sugar|शुगर|सब्ज़ी|சர்க்கரை|ಸಕ್ಕರೆ|hba1c|blood pressure|bp|रक्तदबाव|रक्तचाप|बीपी|ரத்த அழுத்தம்|ರಕ್ತದೊತ್ತಡ|रिपोर्ट|lab|test|जांच|creatinine|report/i.test(normalized)) {
     agent = 'lab_explainer';
     const hba1c = observations.find(o => o.code.includes('4548-4'));
     const bp = observations.find(o => o.code.includes('85354-9'));
@@ -179,7 +179,7 @@ export function processVdaQuery(
     ];
   }
   // Diet & Lifestyle Intent
-  else if (/diet|खाना|आहार|भोजन|உணவு|சாப்பாடு|ಆಹಾರ|ಊಟ|क्या खाएं|roti|चावल|तेल|मिर्च|वॉक|walk/i.test(normalized)) {
+  else if (/diet|खान|आहार|भोजन|உணவு|சாப்பாடு|ಆಹಾರ|ಊಟ|क्या खाएं|roti|चावल|तेल|मिर्च|वॉक|walk/i.test(normalized)) {
     agent = 'lifestyle_diet';
     replyText = `For diabetes and blood pressure: Prefer whole grains like Bajra or multi-grain rotis over polished white rice. Eat plenty of seasonal green vegetables. Limit salt to under 1 teaspoon per day, and take a 20-30 minute walk every morning.`;
     replyTextHi = `शुगर और बीपी के लिए: सफेद चावल की जगह बाजरा या मल्टीग्रेन रोटी खाएं। हरी सब्जियां अधिक लें। दिन भर में 1 चम्मच से कम नमक खाएं और रोज सुबह 20-30 मिनट जरूर टहलें।`;

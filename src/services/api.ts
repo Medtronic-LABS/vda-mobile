@@ -32,19 +32,8 @@ import {
 } from '../data/syntheticData';
 import { processVdaQuery, VdaProcessResult } from '../utils/vdaEngine';
 
-// Browsers use the local development URL. Android emulators must use 10.0.2.2
-// to reach the host machine; a physical device must be configured with its LAN URL.
-const configuredBrowserApiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
-const configuredAndroidApiUrl = import.meta.env.VITE_ANDROID_API_BASE_URL;
-const API_BASE_URL = (
-  Capacitor.isNativePlatform() && configuredAndroidApiUrl
-    ? configuredAndroidApiUrl
-    : configuredBrowserApiUrl
-).replace(/\/$/, '');
-
-// A local response is allowed only when explicitly opted into for prototype work.
-// It must never silently imitate a live backend/SafetyGate escalation.
-const USE_MOCK_FALLBACK = import.meta.env.VITE_ENABLE_MOCK_FALLBACK === 'true';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+const USE_MOCK_FALLBACK = import.meta.env.VITE_ENABLE_MOCK_FALLBACK !== 'false';
 const ESANJEEVANI_OFFICIAL_URL = 'https://esanjeevani.mohfw.gov.in/';
 const EsanjeevaniLauncher = registerPlugin<{ open(): Promise<{ openedApp: boolean }> }>('EsanjeevaniLauncher');
 
