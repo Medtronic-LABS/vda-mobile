@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Sparkles, FileText, Building2, User } from 'lucide-react';
-import { ChatMessage, ClinicalReviewState, FhirCondition, FhirDocument, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from './types';
+import { ChatMessage, ClinicalFollowUp, ClinicalReviewState, FhirCondition, FhirDocument, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from './types';
 import { SYNTHETIC_PATIENTS, FACILITIES_LIST, HEALTH_SCHEMES_LIST } from './data/syntheticData';
 import { getTranslation, playChime } from './utils/i18n';
 import { apiService } from './services/api';
@@ -24,6 +24,7 @@ export default function App() {
 
   // Backend VDA Session State
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [clinicalFollowUps, setClinicalFollowUps] = useState<ClinicalFollowUp[]>([]);
 
   // App Flow Modals
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
@@ -48,6 +49,8 @@ export default function App() {
       const sessionRes = await apiService.createPatientSession(currentPersonaKey);
       if (sessionRes?.session_id) {
         setActiveSessionId(sessionRes.session_id);
+        const followUpResponse = await apiService.getClinicalFollowUps(sessionRes.session_id);
+        setClinicalFollowUps(followUpResponse.followUps);
       }
     };
     initAppSession();
@@ -108,8 +111,11 @@ export default function App() {
     const sessionRes = await apiService.createPatientSession(key);
     if (sessionRes?.session_id) {
       setActiveSessionId(sessionRes.session_id);
+      const followUpResponse = await apiService.getClinicalFollowUps(sessionRes.session_id);
+      setClinicalFollowUps(followUpResponse.followUps);
     } else {
       setActiveSessionId(null);
+      setClinicalFollowUps([]);
     }
 
     setMessages([
@@ -227,6 +233,13 @@ export default function App() {
     }
   };
 
+  const handleClinicalFollowUpAttendance = async (followUpId: string, attended: boolean) => {
+    if (!activeSessionId) throw new Error('NO_ACTIVE_SESSION');
+    const result = await apiService.recordClinicalFollowUpAttendance(activeSessionId, followUpId, attended);
+    setClinicalFollowUps((previous) => previous.filter((followUp) => followUp.id !== followUpId));
+    return result.message;
+  };
+
   // Trigger manual or test escalation
   // The test control now sends the same input through the backend SafetyGate.
   const handleTriggerEscalation = (reason: string) => { void handleSendMessage(reason); };
@@ -316,12 +329,14 @@ export default function App() {
               observations={observations}
               lang={lang}
               messages={messages}
+              clinicalFollowUps={clinicalFollowUps}
               isProcessing={isProcessingMessage}
               onSendMessage={handleSendMessage}
               onToggleMedicationTaken={handleToggleMedication}
               onNavigateTab={setActiveTab}
               onTriggerEscalation={handleTriggerEscalation}
               onOpenLogVital={() => setIsLogVitalOpen(true)}
+              onRecordClinicalFollowUpAttendance={handleClinicalFollowUpAttendance}
             />
           )}
 

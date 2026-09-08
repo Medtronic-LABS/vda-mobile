@@ -22,6 +22,8 @@ import {
   Facility,
   HealthScheme,
   ClinicalReviewState,
+  FollowUpAttendanceResponse,
+  FollowUpListResponse,
   LanguageCode,
   ChatMessage
 } from '../types';
@@ -196,6 +198,32 @@ class ApiService {
       console.warn('[VDA API] Session creation endpoint error:', err);
     }
     return null;
+  }
+
+  /** Loads passive, deterministic clinical follow-ups. This endpoint never creates a VDA turn. */
+  async getClinicalFollowUps(sessionId: string): Promise<FollowUpListResponse> {
+    await this.initAuthToken();
+    return this.request<FollowUpListResponse>(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/follow-ups`,
+      { method: 'GET' },
+      { asOfDate: '', timezone: '', followUps: [] },
+    );
+  }
+
+  /** Records only a checkup-attendance response, never a medication adherence event. */
+  async recordClinicalFollowUpAttendance(
+    sessionId: string,
+    followUpId: string,
+    attended: boolean,
+  ): Promise<FollowUpAttendanceResponse> {
+    await this.initAuthToken();
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/sessions/${encodeURIComponent(sessionId)}/follow-ups/${encodeURIComponent(followUpId)}/attendance`,
+      { method: 'POST', headers: this.getHeaders(), body: JSON.stringify({ attended }) },
+    );
+    if (!response.ok) throw new Error(`Clinical follow-up attendance API error ${response.status}`);
+    const json = await response.json();
+    return json.data !== undefined ? json.data as FollowUpAttendanceResponse : json as FollowUpAttendanceResponse;
   }
 
   /**

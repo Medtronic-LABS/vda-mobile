@@ -257,6 +257,33 @@ export interface ChatMessage {
 
 export type ClinicalChatState = 'WAITING_FOR_CLINICIAN' | 'CLINICIAN_CONNECTED' | 'ENDED';
 
+/** Deterministic clinical follow-up reminder. It is intentionally separate from medication adherence. */
+export interface ClinicalFollowUp {
+  id: string;
+  type: 'CLINICAL_REVIEW' | 'MEDICATION_REVIEW' | 'LAB_REVIEW' | 'CHECKUP';
+  title: string;
+  dueDate: string;
+  daysUntil: number;
+  status: 'DUE_TODAY' | 'DUE_TOMORROW' | 'UPCOMING' | 'ATTENDANCE_CHECK';
+  dateSource: 'EXPLICIT' | 'DERIVED_30_DAY';
+  attendanceStatus: 'PENDING' | 'COMPLETED' | 'MISSED';
+  requiresAttendanceCheck: boolean;
+  condition?: string;
+  guidance?: string;
+}
+
+export interface FollowUpListResponse {
+  asOfDate: string;
+  timezone: string;
+  followUps: ClinicalFollowUp[];
+}
+
+export interface FollowUpAttendanceResponse {
+  followUpId: string;
+  attendanceStatus: 'COMPLETED' | 'MISSED';
+  message: string;
+}
+
 /** Server-authoritative patient view of a persisted clinical escalation. */
 export interface ClinicalReviewFacility {
   name: string;

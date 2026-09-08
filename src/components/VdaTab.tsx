@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, AlertTriangle, QrCode, ShieldAlert, Sparkles, CheckCircle2, Phone, ShieldCheck, ChevronDown, ChevronUp, Paperclip, FileText, X, LoaderCircle } from 'lucide-react';
-import { ChatMessage, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from '../types';
+import { ChatMessage, ClinicalFollowUp, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from '../types';
 import { getTranslation, playChime, getLocalizedField } from '../utils/i18n';
 import { getChatMessageText, getQuickActionLabel, getCardTitle } from '../utils/vdaEngine';
 import { apiService } from '../services/api';
@@ -11,13 +11,75 @@ interface VdaTabProps {
   observations: FhirObservation[];
   lang: LanguageCode;
   messages: ChatMessage[];
+  clinicalFollowUps: ClinicalFollowUp[];
   isProcessing: boolean;
   onSendMessage: (text: string, file?: File) => void;
   onToggleMedicationTaken: (medId: string) => void;
   onNavigateTab: (tab: 'vda' | 'records' | 'facilities' | 'profile') => void;
   onTriggerEscalation: (reason: string) => void;
   onOpenLogVital: () => void;
+  onRecordClinicalFollowUpAttendance: (followUpId: string, attended: boolean) => Promise<string>;
 }
+
+type FollowUpCopy = { heading: string; message: string; supporting?: string };
+
+const patientConditionLabel = (followUp: ClinicalFollowUp, lang: LanguageCode): string | null => {
+  const source = `${followUp.condition || ''} ${followUp.title || ''}`.toLowerCase();
+  const hindi = lang === 'hi';
+  if (/diabetes|t2dm|mellitus/.test(source)) return hindi ? 'डायबिटीज़' : 'diabetes';
+  if (/hypertension|htn|blood pressure|bp/.test(source)) return hindi ? 'बीपी' : 'blood pressure';
+  if (/ckd|renal|nephropathy|kidney/.test(source)) return hindi ? 'किडनी' : 'kidney';
+  if (/cad|coronary|heart|cardiac/.test(source)) return hindi ? 'दिल' : 'heart';
+  return null;
+};
+
+const localizedFollowUpDate = (dueDate: string, lang: LanguageCode): string => {
+  const locale = lang === 'hi' ? 'hi-IN' : lang === 'ta' ? 'ta-IN' : lang === 'kn' ? 'kn-IN' : 'en-IN';
+  return new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long' })
+    .format(new Date(`${dueDate}T12:00:00+05:30`));
+};
+
+const followUpCopy = (followUp: ClinicalFollowUp, lang: LanguageCode): FollowUpCopy => {
+  const isHindi = lang === 'hi';
+  const condition = patientConditionLabel(followUp, lang);
+  const checkup = isHindi ? (condition ? `${condition} का चेकअप` : 'चेकअप') : (condition ? `${condition} check-up` : 'check-up');
+  const date = localizedFollowUpDate(followUp.dueDate, lang);
+
+  if (followUp.status === 'ATTENDANCE_CHECK') {
+    return isHindi
+      ? { heading: 'VDA साथी की एक छोटी सी बात', message: `कल आपका ${checkup} था। क्या आप चेकअप कराने गए थे?` }
+      : { heading: 'A quick reminder from VDA Saathi', message: `Your ${checkup} was yesterday. Were you able to go?` };
+  }
+  if (followUp.status === 'DUE_TODAY') {
+    return isHindi
+      ? { heading: 'आज का रिमाइंडर', message: `आज आपको ${checkup} कराने जाना है।`, supporting: 'अपना चेकअप कराना न भूलें।' }
+      : { heading: 'Today’s reminder', message: `Your ${checkup} is today.`, supporting: 'Please do not forget your check-up.' };
+  }
+  if (followUp.status === 'DUE_TOMORROW') {
+    return isHindi
+      ? { heading: 'कल का रिमाइंडर', message: `कल आपको ${checkup} कराने जाना है।`, supporting: 'समय पर जाना याद रखें।' }
+      : { heading: 'Tomorrow’s reminder', message: `Your ${checkup} is tomorrow.`, supporting: 'Please remember to go on time.' };
+  }
+  if (followUp.dateSource === 'DERIVED_30_DAY') {
+    return isHindi
+      ? { heading: 'चेकअप की याद दिलाने वाली बात', message: `आपकी पिछली जाँच को लगभग 30 दिन हो गए हैं। ${checkup} ${date} के आसपास कराना अच्छा रहेगा।` }
+      : { heading: 'Check-up reminder', message: `It has been about 30 days since your previous visit. A ${checkup} may be useful around ${date}.` };
+  }
+  return isHindi
+    ? { heading: 'चेकअप की याद दिलाने वाली बात', message: `आपका ${checkup} ${date} को है।`, supporting: 'चेकअप के लिए समय पर जाना याद रखें।' }
+    : { heading: 'Check-up reminder', message: `Your ${checkup} is on ${date}.`, supporting: 'Please remember to go on time.' };
+};
+
+const attendanceFeedbackCopy = (attended: boolean, lang: LanguageCode): string => {
+  if (lang === 'hi') {
+    return attended
+      ? 'बहुत अच्छा। नियमित चेकअप कराते रहना आपकी सेहत पर नज़र रखने में मदद करता है।'
+      : 'कोई बात नहीं। अपना चेकअप जल्द करा लें और जरूरत हो तो अस्पताल या डॉक्टर से समय ले लें।';
+  }
+  return attended
+    ? 'That’s good. Regular check-ups help you keep track of your health.'
+    : 'That is okay. Please arrange your check-up soon, and contact your hospital or doctor if you need an appointment.';
+};
 
 export const VdaTab: React.FC<VdaTabProps> = ({
   patient,
@@ -25,12 +87,14 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   observations,
   lang,
   messages,
+  clinicalFollowUps,
   isProcessing,
   onSendMessage,
   onToggleMedicationTaken,
   onNavigateTab,
   onTriggerEscalation,
-  onOpenLogVital
+  onOpenLogVital,
+  onRecordClinicalFollowUpAttendance,
 }) => {
   const [inputText, setInputText] = useState('');
   const [voiceState, setVoiceState] = useState<'idle' | 'recording' | 'transcribing' | 'auto_sending' | 'waiting_for_vda' | 'error'>('idle');
@@ -39,6 +103,8 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [showSymptomGrid, setShowSymptomGrid] = useState(false);
   const [showEmergencyDial, setShowEmergencyDial] = useState(false);
+  const [followUpBusyId, setFollowUpBusyId] = useState<string | null>(null);
+  const [followUpFeedback, setFollowUpFeedback] = useState('');
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -195,6 +261,19 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   };
 
   const handleSpeakMessage = (msg: ChatMessage) => { void playResponseAudio(msg); };
+
+  const recordFollowUpAttendance = async (followUp: ClinicalFollowUp, attended: boolean) => {
+    setFollowUpBusyId(followUp.id);
+    setFollowUpFeedback('');
+    try {
+      await onRecordClinicalFollowUpAttendance(followUp.id, attended);
+      setFollowUpFeedback(attendanceFeedbackCopy(attended, lang));
+    } catch {
+      setFollowUpFeedback(lang === 'hi' ? 'फॉलो-अप स्थिति अपडेट नहीं हो सकी। कृपया बाद में फिर प्रयास करें।' : 'Unable to update the follow-up status. Please try again later.');
+    } finally {
+      setFollowUpBusyId(null);
+    }
+  };
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
@@ -540,7 +619,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
         </div>
 
         {/* Message Bubble Stream */}
-        {messages.map((msg) => {
+        {messages.map((msg, index) => {
           const isUser = msg.sender === 'user';
           const isSpeaking = speakingMsgId === msg.id;
           const displayMessageText = getChatMessageText(msg, lang);
@@ -688,6 +767,38 @@ export const VdaTab: React.FC<VdaTabProps> = ({
                     </div>
                   )}
                 </div>
+              )}
+
+              {/* Passive follow-ups are contextual VDA reminders, not conversation turns. */}
+              {!isUser && index === 0 && (clinicalFollowUps.length > 0 || followUpFeedback) && (
+                <section className="w-full max-w-[85%] space-y-2" aria-label="Clinical follow-up reminders">
+                  {clinicalFollowUps.map((followUp) => (
+                    <div key={followUp.id} className="rounded-xl border border-emerald-500/25 bg-emerald-950/25 px-3 py-2.5 shadow-sm">
+                      <div className="flex items-start gap-2.5">
+                        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-300">
+                          <Sparkles className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          {(() => {
+                            const copy = followUpCopy(followUp, lang);
+                            return <>
+                              <p className="text-[10px] font-bold tracking-wide text-emerald-300">{copy.heading}</p>
+                              <p className="mt-1 text-xs font-semibold leading-relaxed text-slate-100">{copy.message}</p>
+                              {copy.supporting && <p className="mt-0.5 text-[11px] leading-relaxed text-slate-300">{copy.supporting}</p>}
+                            </>;
+                          })()}
+                          {followUp.requiresAttendanceCheck && (
+                            <div className="mt-2.5 flex gap-2">
+                              <button disabled={followUpBusyId === followUp.id} onClick={() => void recordFollowUpAttendance(followUp, true)} className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-slate-950 disabled:opacity-60">{lang === 'hi' ? 'हाँ, गया था' : 'Yes, I went'}</button>
+                              <button disabled={followUpBusyId === followUp.id} onClick={() => void recordFollowUpAttendance(followUp, false)} className="rounded-lg border border-amber-400/50 px-3 py-1.5 text-xs font-bold text-amber-100 disabled:opacity-60">{lang === 'hi' ? 'नहीं जा पाया' : 'I could not go'}</button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {followUpFeedback && <p className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs leading-relaxed text-emerald-100">{followUpFeedback}</p>}
+                </section>
               )}
 
               {/* Quick Action Buttons */}
