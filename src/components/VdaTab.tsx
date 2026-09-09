@@ -21,7 +21,7 @@ interface VdaTabProps {
   onRecordClinicalFollowUpAttendance: (followUpId: string, attended: boolean) => Promise<string>;
 }
 
-type FollowUpCopy = { heading: string; message: string; supporting?: string };
+type FollowUpCopy = { heading: string; message: string; question?: string; supporting?: string };
 
 const patientConditionLabel = (followUp: ClinicalFollowUp, lang: LanguageCode): string | null => {
   const source = `${followUp.condition || ''} ${followUp.title || ''}`.toLowerCase();
@@ -43,6 +43,7 @@ const followUpCopy = (followUp: ClinicalFollowUp, lang: LanguageCode): FollowUpC
   const isHindi = lang === 'hi';
   const condition = patientConditionLabel(followUp, lang);
   const checkup = isHindi ? (condition ? `${condition} का चेकअप` : 'चेकअप') : (condition ? `${condition} check-up` : 'check-up');
+  const checkupName = isHindi ? (condition ? `${condition} चेकअप` : 'चेकअप') : checkup;
   const date = localizedFollowUpDate(followUp.dueDate, lang);
 
   if (followUp.status === 'ATTENDANCE_CHECK') {
@@ -52,8 +53,8 @@ const followUpCopy = (followUp: ClinicalFollowUp, lang: LanguageCode): FollowUpC
   }
   if (followUp.status === 'DUE_TODAY') {
     return isHindi
-      ? { heading: 'आज का रिमाइंडर', message: `आज आपको ${checkup} कराने जाना है।`, supporting: 'अपना चेकअप कराना न भूलें।' }
-      : { heading: 'Today’s reminder', message: `Your ${checkup} is today.`, supporting: 'Please do not forget your check-up.' };
+      ? { heading: 'आज आपके लिए', message: `आज आपका ${checkupName} है।`, question: 'क्या आप आज चेकअप कराने जा रहे हैं?' }
+      : { heading: 'For you today', message: `Your ${checkup} is today.`, question: 'Are you planning to go for your check-up today?' };
   }
   if (followUp.status === 'DUE_TOMORROW') {
     return isHindi
@@ -70,16 +71,37 @@ const followUpCopy = (followUp: ClinicalFollowUp, lang: LanguageCode): FollowUpC
     : { heading: 'Check-up reminder', message: `Your ${checkup} is on ${date}.`, supporting: 'Please remember to go on time.' };
 };
 
-const attendanceFeedbackCopy = (attended: boolean, lang: LanguageCode): string => {
+const followUpSpeechText = (followUp: ClinicalFollowUp, lang: LanguageCode): string => {
+  const copy = followUpCopy(followUp, lang);
+  return [copy.message, copy.question, copy.supporting].filter(Boolean).join(' ');
+};
+
+const attendanceFeedbackCopy = (followUp: ClinicalFollowUp, attended: boolean, lang: LanguageCode): string => {
   if (lang === 'hi') {
     return attended
-      ? 'बहुत अच्छा। नियमित चेकअप कराते रहना आपकी सेहत पर नज़र रखने में मदद करता है।'
-      : 'कोई बात नहीं। अपना चेकअप जल्द करा लें और जरूरत हो तो अस्पताल या डॉक्टर से समय ले लें।';
+      ? '🎉 बहुत बढ़िया! आपने अपना चेकअप पूरा किया। नियमित चेकअप आपकी सेहत पर नज़र रखने में मदद करता है। स्वास्थ्य लक्ष्य पूरा।'
+      : 'कोई बात नहीं। चेकअप कराना आपकी सेहत की निगरानी के लिए जरूरी है। जब संभव हो, अपना चेकअप दोबारा तय कर लें।';
   }
   return attended
-    ? 'That’s good. Regular check-ups help you keep track of your health.'
-    : 'That is okay. Please arrange your check-up soon, and contact your hospital or doctor if you need an appointment.';
+    ? '🎉 Well done! You completed your check-up. Regular check-ups help you keep track of your health. Health goal completed.'
+    : 'That is okay. Check-ups help monitor your health. Please arrange your check-up again when practical.';
 };
+
+const followUpIntentConfirmation = (lang: LanguageCode) => lang === 'hi'
+  ? {
+      title: 'बहुत बढ़िया!',
+      message: 'आपने आज के चेकअप के लिए जाने की पुष्टि की है।',
+      supporting: 'समय पर चेकअप कराना आपकी सेहत पर नज़र रखने में मदद करता है। कल मैं आपसे पूछूँगा कि आपका चेकअप हुआ या नहीं।',
+      goal: 'आज का स्वास्थ्य लक्ष्य तैयार',
+      spokenText: 'बहुत बढ़िया। समय पर चेकअप कराना आपकी सेहत पर नज़र रखने में मदद करता है। कल मैं आपसे पूछूँगा कि आपका चेकअप हुआ या नहीं।',
+    }
+  : {
+      title: 'Great!',
+      message: 'You have confirmed that you plan to go for today’s check-up.',
+      supporting: 'Timely check-ups help you keep track of your health. Tomorrow, I will ask whether you were able to go.',
+      goal: 'Today’s health goal is set',
+      spokenText: 'That is great. Timely check-ups help you keep track of your health. Tomorrow, I will ask whether you were able to go.',
+    };
 
 export const VdaTab: React.FC<VdaTabProps> = ({
   patient,
@@ -105,6 +127,8 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   const [showEmergencyDial, setShowEmergencyDial] = useState(false);
   const [followUpBusyId, setFollowUpBusyId] = useState<string | null>(null);
   const [followUpFeedback, setFollowUpFeedback] = useState('');
+  const [followUpIntentIds, setFollowUpIntentIds] = useState<Set<string>>(() => new Set());
+  const [pendingFollowUpConfirmationIds, setPendingFollowUpConfirmationIds] = useState<Set<string>>(() => new Set());
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -113,6 +137,9 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   const voiceAutoSendRef = useRef(false);
   const voiceTurnStartedRef = useRef(false);
   const playbackRef = useRef<HTMLAudioElement | null>(null);
+  const audioBusyRef = useRef(false);
+  const spokenFollowUpIdsRef = useRef<Set<string>>(new Set());
+  const spokenFollowUpConfirmationIdsRef = useRef<Set<string>>(new Set());
   const lastAutoSpokenMessageId = useRef<string | null>(messages[messages.length - 1]?.sender === 'vda' ? messages[messages.length - 1].id : null);
 
   // Auto-scroll chat to latest message
@@ -151,34 +178,89 @@ export const VdaTab: React.FC<VdaTabProps> = ({
     recordingCancelledRef.current = true;
     recorderRef.current?.stop();
     playbackRef.current?.pause();
+    audioBusyRef.current = false;
   }, []);
 
-  const playResponseAudio = async (msg: ChatMessage) => {
-    if (speakingMsgId === msg.id) {
+  const playTextAudio = async (audioId: string, text: string) => {
+    if (speakingMsgId === audioId) {
       playbackRef.current?.pause();
+      audioBusyRef.current = false;
       setSpeakingMsgId(null);
       return;
     }
-    const textToSpeak = getChatMessageText(msg, lang).trim();
+    if (audioBusyRef.current) return;
+    const textToSpeak = text.trim();
     if (!textToSpeak) return;
     try {
       playbackRef.current?.pause();
-      setSpeakingMsgId(msg.id);
+      audioBusyRef.current = true;
+      setSpeakingMsgId(audioId);
       const audioBlob = await apiService.synthesizeVoice(textToSpeak.slice(0, 2500), lang);
       const url = URL.createObjectURL(audioBlob);
       const player = new Audio(url);
       player.onended = () => {
         URL.revokeObjectURL(url);
+        audioBusyRef.current = false;
+        setSpeakingMsgId(null);
+      };
+      player.onerror = () => {
+        URL.revokeObjectURL(url);
+        audioBusyRef.current = false;
         setSpeakingMsgId(null);
       };
       playbackRef.current = player;
       await player.play();
     } catch {
       // Text remains usable; device speech is not a silent fallback.
+      audioBusyRef.current = false;
       setSpeakingMsgId(null);
       setVoiceError(lang === 'hi' ? 'आवाज़ चलाने में समस्या हुई। आप उत्तर पढ़ सकते हैं।' : 'Voice playback is unavailable. You can still read the response.');
     }
   };
+
+  const playResponseAudio = async (msg: ChatMessage) => {
+    await playTextAudio(msg.id, getChatMessageText(msg, lang));
+  };
+
+  const playFollowUpAudio = async (followUp: ClinicalFollowUp) => {
+    await playTextAudio(`follow-up-${followUp.id}`, followUpSpeechText(followUp, lang));
+  };
+
+  const playFollowUpConfirmationAudio = async (followUp: ClinicalFollowUp) => {
+    await playTextAudio(`follow-up-confirmation-${followUp.id}`, followUpIntentConfirmation(lang).spokenText);
+  };
+
+  // A reminder is spoken at most once for each follow-up during this mounted session.
+  // It waits until no response audio, recording, transcription, or VDA turn is active.
+  useEffect(() => {
+    if (isProcessing || voiceState !== 'idle' || speakingMsgId || audioBusyRef.current) return;
+    const followUp = clinicalFollowUps.find((item) => (
+      !spokenFollowUpIdsRef.current.has(item.id) && !followUpIntentIds.has(item.id)
+    ));
+    if (!followUp) return;
+
+    spokenFollowUpIdsRef.current.add(followUp.id);
+    void playFollowUpAudio(followUp);
+  }, [clinicalFollowUps, followUpIntentIds, isProcessing, lang, speakingMsgId, voiceState]);
+
+  // The planned-attendance confirmation is distinct from actual attendance. It is
+  // queued until existing voice/STT activity is idle, and can only auto-play once.
+  useEffect(() => {
+    if (isProcessing || voiceState !== 'idle' || speakingMsgId || audioBusyRef.current) return;
+    const followUp = clinicalFollowUps.find((item) => (
+      pendingFollowUpConfirmationIds.has(item.id)
+      && !spokenFollowUpConfirmationIdsRef.current.has(item.id)
+    ));
+    if (!followUp) return;
+
+    spokenFollowUpConfirmationIdsRef.current.add(followUp.id);
+    setPendingFollowUpConfirmationIds((previous) => {
+      const next = new Set(previous);
+      next.delete(followUp.id);
+      return next;
+    });
+    void playFollowUpConfirmationAudio(followUp);
+  }, [clinicalFollowUps, isProcessing, lang, pendingFollowUpConfirmationIds, speakingMsgId, voiceState]);
 
   const stopRecording = (cancel = false) => {
     if (!recorderRef.current) return;
@@ -267,12 +349,27 @@ export const VdaTab: React.FC<VdaTabProps> = ({
     setFollowUpFeedback('');
     try {
       await onRecordClinicalFollowUpAttendance(followUp.id, attended);
-      setFollowUpFeedback(attendanceFeedbackCopy(attended, lang));
+      setFollowUpFeedback(attendanceFeedbackCopy(followUp, attended, lang));
     } catch {
       setFollowUpFeedback(lang === 'hi' ? 'फॉलो-अप स्थिति अपडेट नहीं हो सकी। कृपया बाद में फिर प्रयास करें।' : 'Unable to update the follow-up status. Please try again later.');
     } finally {
       setFollowUpBusyId(null);
     }
+  };
+
+  const confirmFollowUpIntent = (followUp: ClinicalFollowUp) => {
+    setFollowUpIntentIds((previous) => new Set(previous).add(followUp.id));
+    setFollowUpFeedback('');
+    setPendingFollowUpConfirmationIds((previous) => new Set(previous).add(followUp.id));
+  };
+
+  const acknowledgeFollowUp = (followUp: ClinicalFollowUp) => {
+    setFollowUpIntentIds((previous) => new Set(previous).add(followUp.id));
+  };
+
+  const openFollowUpFacilities = () => {
+    // Reuses the existing facility tab; no VDA turn or new facility lookup is created here.
+    onNavigateTab('facilities');
   };
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -772,31 +869,84 @@ export const VdaTab: React.FC<VdaTabProps> = ({
               {/* Passive follow-ups are contextual VDA reminders, not conversation turns. */}
               {!isUser && index === 0 && (clinicalFollowUps.length > 0 || followUpFeedback) && (
                 <section className="w-full max-w-[85%] space-y-2" aria-label="Clinical follow-up reminders">
-                  {clinicalFollowUps.map((followUp) => (
-                    <div key={followUp.id} className="rounded-xl border border-emerald-500/25 bg-emerald-950/25 px-3 py-2.5 shadow-sm">
-                      <div className="flex items-start gap-2.5">
-                        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-300">
-                          <Sparkles className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          {(() => {
-                            const copy = followUpCopy(followUp, lang);
-                            return <>
+                  {clinicalFollowUps.map((followUp) => {
+                    const copy = followUpCopy(followUp, lang);
+                    const isAcknowledged = followUpIntentIds.has(followUp.id);
+                    const isTodayIntentConfirmed = followUp.status === 'DUE_TODAY' && isAcknowledged;
+
+                    return (
+                      <div key={followUp.id} className="rounded-xl border border-emerald-500/25 bg-emerald-950/25 px-3 py-2.5 shadow-sm">
+                        <div className="flex items-start gap-2.5">
+                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-300">
+                            {isTodayIntentConfirmed ? <CheckCircle2 className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            {isTodayIntentConfirmed ? (() => {
+                              const confirmation = followUpIntentConfirmation(lang);
+                              return <>
+                                <p className="text-xs font-bold text-emerald-200">✓ {confirmation.title}</p>
+                                <p className="mt-1 text-xs font-semibold leading-relaxed text-slate-100">{confirmation.message}</p>
+                                <p className="mt-1 text-[11px] leading-relaxed text-slate-300">{confirmation.supporting}</p>
+                                <div className="mt-2 inline-flex items-center rounded-lg bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-200">
+                                  🏆 {confirmation.goal}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => void playFollowUpConfirmationAudio(followUp)}
+                                  className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-emerald-300 hover:text-emerald-200"
+                                >
+                                  <Volume2 className="h-3.5 w-3.5" />
+                                  <span>{lang === 'hi' ? 'सुनें' : 'Listen'}</span>
+                                </button>
+                              </>;
+                            })() : <>
                               <p className="text-[10px] font-bold tracking-wide text-emerald-300">{copy.heading}</p>
                               <p className="mt-1 text-xs font-semibold leading-relaxed text-slate-100">{copy.message}</p>
+                              {copy.question && <p className="mt-1 text-xs leading-relaxed text-slate-200">{copy.question}</p>}
                               {copy.supporting && <p className="mt-0.5 text-[11px] leading-relaxed text-slate-300">{copy.supporting}</p>}
-                            </>;
-                          })()}
-                          {followUp.requiresAttendanceCheck && (
-                            <div className="mt-2.5 flex gap-2">
-                              <button disabled={followUpBusyId === followUp.id} onClick={() => void recordFollowUpAttendance(followUp, true)} className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-slate-950 disabled:opacity-60">{lang === 'hi' ? 'हाँ, गया था' : 'Yes, I went'}</button>
-                              <button disabled={followUpBusyId === followUp.id} onClick={() => void recordFollowUpAttendance(followUp, false)} className="rounded-lg border border-amber-400/50 px-3 py-1.5 text-xs font-bold text-amber-100 disabled:opacity-60">{lang === 'hi' ? 'नहीं जा पाया' : 'I could not go'}</button>
-                            </div>
-                          )}
+
+                              {followUp.requiresAttendanceCheck ? (
+                              <div className="mt-2.5 flex flex-wrap gap-2">
+                                <button disabled={followUpBusyId === followUp.id} onClick={() => void recordFollowUpAttendance(followUp, true)} className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-slate-950 disabled:opacity-60">{lang === 'hi' ? 'हाँ, गया था' : 'Yes, I went'}</button>
+                                <button disabled={followUpBusyId === followUp.id} onClick={() => void recordFollowUpAttendance(followUp, false)} className="rounded-lg border border-amber-400/50 px-3 py-1.5 text-xs font-bold text-amber-100 disabled:opacity-60">{lang === 'hi' ? 'नहीं जा पाया' : 'I could not go'}</button>
+                              </div>
+                            ) : isAcknowledged ? (
+                              <p className="mt-2 text-[11px] font-semibold text-emerald-200">✓ {lang === 'hi' ? 'ठीक है, मैं आपको याद दिलाता रहूँगा।' : 'Okay, I will keep reminding you.'}</p>
+                            ) : (
+                              <div className="mt-2.5 flex flex-wrap gap-2">
+                                <button
+                                  onClick={() => followUp.status === 'DUE_TODAY' ? confirmFollowUpIntent(followUp) : acknowledgeFollowUp(followUp)}
+                                  className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-slate-950"
+                                >
+                                  {followUp.status === 'DUE_TODAY'
+                                    ? (lang === 'hi' ? 'हाँ, जाऊँगा' : 'Yes, I will go')
+                                    : followUp.status === 'DUE_TOMORROW'
+                                      ? (lang === 'hi' ? 'ठीक है' : 'Okay')
+                                      : (lang === 'hi' ? 'याद रखूँगा' : 'I will remember')}
+                                </button>
+                                <button
+                                  onClick={openFollowUpFacilities}
+                                  className="rounded-lg border border-emerald-400/45 px-3 py-1.5 text-xs font-bold text-emerald-100 hover:bg-emerald-500/10"
+                                >
+                                  {lang === 'hi' ? 'कहाँ जाना है?' : 'Where can I go?'}
+                                </button>
+                              </div>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => void playFollowUpAudio(followUp)}
+                              className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-emerald-300 hover:text-emerald-200"
+                            >
+                              <Volume2 className="h-3.5 w-3.5" />
+                              <span>{lang === 'hi' ? 'सुनें' : 'Listen'}</span>
+                            </button>
+                            </>}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {followUpFeedback && <p className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs leading-relaxed text-emerald-100">{followUpFeedback}</p>}
                 </section>
               )}
