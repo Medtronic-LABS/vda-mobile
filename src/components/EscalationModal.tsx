@@ -1,11 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp, ExternalLink, Phone, Send, ShieldAlert, Volume2, VolumeX } from 'lucide-react';
+import { AlertTriangle, ExternalLink, Hospital, Phone, Send, ShieldAlert, Volume2, VolumeX } from 'lucide-react';
 import { ClinicalReviewState, LanguageCode } from '../types';
 import { speakText, stopSpeaking } from '../utils/i18n';
 
 interface EscalationModalProps {
   review: ClinicalReviewState;
-  emergencyInstruction: string;
   lang: LanguageCode;
   onSendMessageToClinician: (text: string) => Promise<void>;
   onOpenTeleconsultation: () => Promise<void>;
@@ -14,13 +13,15 @@ interface EscalationModalProps {
 const label = (lang: LanguageCode, hi: string, en: string) => lang === 'hi' ? hi : en;
 
 /** Server-backed clinician chat. Emergency cards follow the initial patient message. */
-export const EscalationModal: React.FC<EscalationModalProps> = ({ review, emergencyInstruction, lang, onSendMessageToClinician, onOpenTeleconsultation }) => {
+export const EscalationModal: React.FC<EscalationModalProps> = ({ review, lang, onSendMessageToClinician, onOpenTeleconsultation }) => {
   const [replyText, setReplyText] = useState('');
   const [sending, setSending] = useState(false);
   const [actionError, setActionError] = useState('');
   const [speakingMessage, setSpeakingMessage] = useState<number | null>(null);
-  const [facilitiesExpanded, setFacilitiesExpanded] = useState(false);
+  const [speakingGuidance, setSpeakingGuidance] = useState(false);
+  const [showAllFacilities, setShowAllFacilities] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const facilitiesRef = useRef<HTMLElement>(null);
   const connected = review.clinicalChatState === 'CLINICIAN_CONNECTED';
   const fallbackVisible = review.teleconsultationOffered && !connected;
 
@@ -45,18 +46,30 @@ export const EscalationModal: React.FC<EscalationModalProps> = ({ review, emerge
     catch { setActionError(label(lang, 'eSanjeevani खोलने में समस्या हुई।', 'Unable to open eSanjeevani.')); }
   };
   const speak = (text: string, index: number) => {
-    if (speakingMessage === index) { stopSpeaking(); setSpeakingMessage(null); return; }
-    setSpeakingMessage(index); speakText(text, lang, () => setSpeakingMessage(null));
+    if (speakingMessage === index) { stopSpeaking(); setSpeakingMessage(null); setSpeakingGuidance(false); return; }
+    setSpeakingGuidance(false); setSpeakingMessage(index); speakText(text, lang, () => setSpeakingMessage(null));
   };
+  const guidanceText = label(
+    lang,
+    'अगर आपकी हालत गंभीर है या तकलीफ बढ़ रही है, तो इंतजार न करें। तुरंत नजदीकी बड़े अस्पताल जाएं या एम्बुलेंस बुलाएं।',
+    'If your condition is serious or getting worse, do not wait. Go to a nearby large hospital or call an ambulance now.',
+  );
+  const speakGuidance = () => {
+    if (speakingGuidance) { stopSpeaking(); setSpeakingGuidance(false); return; }
+    setSpeakingMessage(null); setSpeakingGuidance(true);
+    speakText(guidanceText, lang, () => setSpeakingGuidance(false));
+  };
+  const visibleFacilities = showAllFacilities
+    ? review.nearbyFacilities
+    : review.nearbyFacilities.slice(0, 3);
 
   const emergencyGuidance = <section className="rounded-xl border border-red-400/35 bg-red-950/40 px-3 py-2.5 text-red-50">
-    <div className="flex gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-300" /><div><b className="block text-xs">{label(lang, 'Emergency guidance', 'Emergency guidance')}</b><p className="mt-0.5 text-xs leading-relaxed">{emergencyInstruction}</p></div></div>
+    <div className="flex gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-300" /><div><b className="block text-xs">{label(lang, 'जरूरी सूचना', 'Important information')}</b><p className="mt-0.5 text-xs leading-relaxed">{guidanceText}</p><button type="button" onClick={speakGuidance} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-red-100 underline underline-offset-2">{speakingGuidance ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}{speakingGuidance ? label(lang, 'रोकें', 'Stop') : label(lang, 'सुनें', 'Listen')}</button></div></div>
   </section>;
   const fallbackCard = fallbackVisible ? <section className="rounded-xl border border-amber-300/30 bg-slate-900 p-3 space-y-3">
-    <div><b className="text-sm text-amber-100">{label(lang, 'Clinician अभी उपलब्ध नहीं हो पाए हैं।', 'A clinician has not joined this chat yet.')}</b><p className="mt-1 text-xs leading-relaxed text-slate-300">{label(lang, 'Emergency symptoms के लिए तुरंत नजदीकी emergency facility या emergency services का उपयोग करें। eSanjeevani emergency care का विकल्प नहीं है।', 'For emergency symptoms, use a nearby emergency facility or emergency services immediately. eSanjeevani is not a replacement for emergency care.')}</p></div>
-    <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setFacilitiesExpanded((value) => !value)} className="inline-flex min-h-11 items-center justify-center gap-1 rounded-xl border border-slate-600 bg-slate-800 px-2 text-xs font-semibold text-white"><Phone className="h-4 w-4 text-emerald-300" />{label(lang, 'नजदीकी अस्पताल', 'Nearby hospitals')} {facilitiesExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button><button type="button" onClick={() => void openTeleconsultation()} className="inline-flex min-h-11 items-center justify-center gap-1 rounded-xl bg-white px-2 text-xs font-bold text-slate-900"><ExternalLink className="h-4 w-4" />{label(lang, 'eSanjeevani पर परामर्श लें', 'Consult on eSanjeevani')}</button></div>
-    <small className="block text-xs text-amber-100">{label(lang, 'गंभीर लक्षणों में eSanjeevani का इंतज़ार न करें।', 'Do not wait for eSanjeevani when symptoms are severe.')}</small>
-    {facilitiesExpanded && <div className="grid gap-2 border-t border-slate-700 pt-3"><b className="text-xs text-slate-200">{label(lang, `नजदीकी अस्पताल (${review.nearbyFacilities.length})`, `Nearby hospitals (${review.nearbyFacilities.length})`)}</b>{review.nearbyFacilities.length === 0 && <p className="text-xs text-slate-400">{label(lang, 'इस स्थान के लिए facility विकल्प उपलब्ध नहीं हैं।', 'No facility options are available for this location.')}</p>}{review.nearbyFacilities.map((facility, index) => <article key={`${facility.name}-${index}`} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs"><b className="block text-sm text-white">{facility.name}</b><p className="mt-0.5 text-slate-300">{[facility.district, facility.city, facility.state].filter(Boolean).join(', ')}</p>{(facility.hospitalType || facility.schemes.length > 0) && <p className="mt-1 text-slate-400">{[facility.hospitalType, facility.schemes.includes('AYUSHMAN_BHARAT') || facility.schemes.includes('PMJAY') ? 'PM-JAY listed' : ''].filter(Boolean).join(' • ')}</p>}<small className="mt-1 block text-amber-100">{facility.emergencyCapabilityVerified ? label(lang, 'आपात सुविधा स्रोत में सूचीबद्ध है; जाने से पहले पुष्टि करें।', 'Emergency capability is source-listed; please confirm before visiting.') : label(lang, 'वर्तमान emergency availability जाने से पहले facility से पुष्टि करें।', 'Please confirm current emergency availability with the facility before visiting.')}</small>{facility.contactNumber && <a href={`tel:${facility.contactNumber}`} className="mt-2 inline-flex rounded-lg bg-slate-800 px-2 py-1 font-semibold text-emerald-300">{label(lang, 'कॉल करें', 'Call')}</a>}</article>)}</div>}
+    <div><b className="text-sm text-amber-100">{label(lang, 'क्लिनिकल टीम अभी नहीं जुड़ पाई है।', 'The clinical team has not joined yet.')}</b><p className="mt-1 text-xs leading-relaxed text-slate-300">{label(lang, 'गंभीर तकलीफ में मदद लेने में देरी न करें। eSanjeevani आपात मदद की जगह नहीं है।', 'Do not delay getting help for serious symptoms. eSanjeevani does not replace emergency care.')}</p></div>
+    <div className="grid grid-cols-3 gap-2"><a href="tel:108" className="inline-flex min-h-11 items-center justify-center gap-1 rounded-xl border border-red-400/45 bg-red-950/45 px-2 text-center text-xs font-bold text-red-50"><Phone className="h-4 w-4 shrink-0" />{label(lang, 'एम्बुलेंस बुलाएं', 'Call ambulance')}</a><button type="button" onClick={() => facilitiesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="inline-flex min-h-11 items-center justify-center gap-1 rounded-xl border border-slate-600 bg-slate-800 px-2 text-center text-xs font-semibold text-white"><Hospital className="h-4 w-4 shrink-0 text-emerald-300" />{label(lang, 'नजदीकी अस्पताल', 'Nearby hospitals')}</button><button type="button" onClick={() => void openTeleconsultation()} className="inline-flex min-h-11 items-center justify-center gap-1 rounded-xl bg-white px-2 text-center text-xs font-bold text-slate-900"><ExternalLink className="h-4 w-4 shrink-0" />{label(lang, 'eSanjeevani से बात करें', 'Talk to eSanjeevani')}</button></div>
+    <section ref={facilitiesRef} className="grid gap-2 border-t border-slate-700 pt-3"><b className="text-xs text-slate-200">{label(lang, 'नजदीकी अस्पताल', 'Nearby hospitals')}</b>{review.nearbyFacilities.length === 0 && <p className="text-xs text-slate-400">{label(lang, 'इस जगह के लिए कोई उपयुक्त अस्पताल नहीं मिला। 108 पर कॉल करें या नजदीकी बड़े अस्पताल जाएं।', 'No suitable hospital was found for this area. Call 108 or go to a nearby large hospital.')}</p>}{visibleFacilities.map((facility, index) => <article key={`${facility.name}-${index}`} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs"><b className="block text-sm text-white">{facility.name}</b><p className="mt-0.5 text-slate-300">{[facility.district, facility.city, facility.state].filter(Boolean).join(', ')}</p>{(facility.hospitalType || facility.schemes.length > 0) && <p className="mt-1 text-slate-400">{[facility.hospitalType, facility.schemes.includes('AYUSHMAN_BHARAT') || facility.schemes.includes('PMJAY') ? 'PM-JAY listed' : ''].filter(Boolean).join(' • ')}</p>}<small className="mt-1 block text-amber-100">{facility.emergencyCapabilityVerified ? label(lang, 'आपात सुविधा की जानकारी स्रोत में दर्ज है। जाने से पहले पुष्टि कर लें।', 'The source lists emergency capability; please confirm before visiting.') : label(lang, 'जाने से पहले सुविधा की उपलब्धता की पुष्टि कर लें।', 'Please confirm availability with the facility before visiting.')}</small></article>)}{review.nearbyFacilities.length > 3 && <button type="button" onClick={() => setShowAllFacilities((value) => !value)} className="justify-self-start text-xs font-semibold text-emerald-300 underline underline-offset-2">{showAllFacilities ? label(lang, 'कम अस्पताल देखें', 'Show fewer hospitals') : label(lang, 'और अस्पताल देखें', 'See more hospitals')}</button>}</section>
   </section> : null;
 
   return <div className="absolute inset-0 z-50 flex flex-col overflow-hidden bg-slate-950 text-slate-100">

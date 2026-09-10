@@ -22,6 +22,8 @@ import {
   Facility,
   HealthScheme,
   ClinicalReviewState,
+  FollowUpAttendanceResponse,
+  FollowUpListResponse,
   LanguageCode,
   ChatMessage
 } from '../types';
@@ -198,6 +200,32 @@ class ApiService {
     return null;
   }
 
+  /** Loads passive, deterministic clinical follow-ups. This endpoint never creates a VDA turn. */
+  async getClinicalFollowUps(sessionId: string): Promise<FollowUpListResponse> {
+    await this.initAuthToken();
+    return this.request<FollowUpListResponse>(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/follow-ups`,
+      { method: 'GET' },
+      { asOfDate: '', timezone: '', followUps: [], progress: { completedFollowUpCount: 0 } },
+    );
+  }
+
+  /** Records only a checkup-attendance response, never a medication adherence event. */
+  async recordClinicalFollowUpAttendance(
+    sessionId: string,
+    followUpId: string,
+    attended: boolean,
+  ): Promise<FollowUpAttendanceResponse> {
+    await this.initAuthToken();
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/sessions/${encodeURIComponent(sessionId)}/follow-ups/${encodeURIComponent(followUpId)}/attendance`,
+      { method: 'POST', headers: this.getHeaders(), body: JSON.stringify({ attended }) },
+    );
+    if (!response.ok) throw new Error(`Clinical follow-up attendance API error ${response.status}`);
+    const json = await response.json();
+    return json.data !== undefined ? json.data as FollowUpAttendanceResponse : json as FollowUpAttendanceResponse;
+  }
+
   /**
    * Send user voice/text query to VDA backend session turns: POST /api/v1/sessions/:session_id/turns
    */
@@ -275,6 +303,62 @@ class ApiService {
       if (USE_MOCK_FALLBACK) return fallback;
       throw err;
     }
+  }
+
+  /** Uploads patient-recorded audio to the authenticated backend STT boundary. */
+  async transcribeVoice(
+    audio: Blob,
+    lang: LanguageCode,
+    durationMs?: number,
+  ): Promise<{ transcript: string; provider: string; fallbackUsed: boolean; detectedLanguage?: string }> {
+    await this.initAuthToken();
+    const form = new FormData();
+    // Preserve the MediaRecorder container in multipart metadata. The backend
+    // validates the MIME type and normalizes accepted audio with FFmpeg.
+    const mimeType = (audio.type || 'audio/webm').split(';', 1)[0].toLowerCase();
+    const extension = mimeType === 'audio/mp4' || mimeType === 'audio/x-m4a'
+      ? '.m4a'
+      : mimeType === 'audio/mpeg'
+        ? '.mp3'
+        : mimeType === 'audio/ogg'
+          ? '.ogg'
+          : mimeType === 'audio/wav' || mimeType === 'audio/x-wav'
+            ? '.wav'
+            : '.webm';
+    form.append('audio', audio, `vda-recording${extension}`);
+    form.append('language_code', this.voiceLanguageCode(lang));
+    if (durationMs !== undefined) form.append('duration_ms', String(durationMs));
+    const headers = this.getHeaders() as Record<string, string>;
+    delete headers['Content-Type'];
+    const response = await fetch(`${API_BASE_URL}/api/v1/voice/stt`, {
+      method: 'POST',
+      headers,
+      body: form,
+    });
+    if (!response.ok) throw new Error(`Voice STT error ${response.status}`);
+    return response.json();
+  }
+
+  /** Requests Sarvam-generated playback for final patient-facing response text. */
+  async synthesizeVoice(text: string, lang: LanguageCode): Promise<Blob> {
+    await this.initAuthToken();
+    const response = await fetch(`${API_BASE_URL}/api/v1/voice/tts`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ text, language_code: this.voiceLanguageCode(lang) }),
+    });
+    if (!response.ok) throw new Error(`Voice TTS error ${response.status}`);
+    return response.blob();
+  }
+
+  private voiceLanguageCode(lang: LanguageCode): string {
+    const languages: Record<LanguageCode, string> = {
+      hi: 'hi-IN',
+      en: 'en-IN',
+      ta: 'ta-IN',
+      kn: 'kn-IN',
+    };
+    return languages[lang];
   }
 
   /** Read the persisted, tenant/session-scoped clinician-chat state. */
