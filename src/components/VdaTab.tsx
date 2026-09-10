@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, AlertTriangle, QrCode, ShieldAlert, Sparkles, CheckCircle2, Phone, ShieldCheck, ChevronDown, ChevronUp, Paperclip, FileText, X, LoaderCircle } from 'lucide-react';
-import { ChatMessage, ClinicalFollowUp, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from '../types';
+import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, AlertTriangle, QrCode, ShieldAlert, Sparkles, CheckCircle2, Phone, Paperclip, FileText, X, LoaderCircle } from 'lucide-react';
+import { ChatMessage, ClinicalFollowUp, FollowUpProgress, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from '../types';
 import { getTranslation, playChime, getLocalizedField } from '../utils/i18n';
 import { getChatMessageText, getQuickActionLabel, getCardTitle } from '../utils/vdaEngine';
 import { apiService } from '../services/api';
@@ -12,6 +12,7 @@ interface VdaTabProps {
   lang: LanguageCode;
   messages: ChatMessage[];
   clinicalFollowUps: ClinicalFollowUp[];
+  followUpProgress: FollowUpProgress;
   isProcessing: boolean;
   onSendMessage: (text: string, file?: File) => void;
   onToggleMedicationTaken: (medId: string) => void;
@@ -91,17 +92,28 @@ const followUpIntentConfirmation = (lang: LanguageCode) => lang === 'hi'
   ? {
       title: 'बहुत बढ़िया!',
       message: 'आपने आज के चेकअप के लिए जाने की पुष्टि की है।',
-      supporting: 'समय पर चेकअप कराना आपकी सेहत पर नज़र रखने में मदद करता है। कल मैं आपसे पूछूँगा कि आपका चेकअप हुआ या नहीं।',
+      supporting: 'समय पर चेकअप कराना आपकी सेहत पर नज़र रखने में मदद करता है।',
       goal: 'आज का स्वास्थ्य लक्ष्य तैयार',
-      spokenText: 'बहुत बढ़िया। समय पर चेकअप कराना आपकी सेहत पर नज़र रखने में मदद करता है। कल मैं आपसे पूछूँगा कि आपका चेकअप हुआ या नहीं।',
+      spokenText: 'बहुत बढ़िया। समय पर चेकअप कराना आपकी सेहत पर नज़र रखने में मदद करता है।',
     }
   : {
       title: 'Great!',
       message: 'You have confirmed that you plan to go for today’s check-up.',
-      supporting: 'Timely check-ups help you keep track of your health. Tomorrow, I will ask whether you were able to go.',
+      supporting: 'Timely check-ups help you keep track of your health.',
       goal: 'Today’s health goal is set',
-      spokenText: 'That is great. Timely check-ups help you keep track of your health. Tomorrow, I will ask whether you were able to go.',
+      spokenText: 'That is great. Timely check-ups help you keep track of your health.',
     };
+
+const healthProgressCopy = (completedCount: number, lang: LanguageCode) => {
+  if (completedCount === 0) {
+    return lang === 'hi'
+      ? { title: 'अपनी सेहत की नियमित देखभाल शुरू करें', description: 'पहला चेकअप पूरा करने पर आपकी प्रगति यहाँ दिखाई देगी।', achievement: 'आपका पहला स्वास्थ्य लक्ष्य' }
+      : { title: 'Start your regular health care journey', description: 'Your progress will appear here after your first completed check-up.', achievement: 'Your first health goal' };
+  }
+  return lang === 'hi'
+    ? { title: 'आप अपनी सेहत की अच्छी देखभाल कर रहे हैं!', description: completedCount === 1 ? '🎉 पहला स्वास्थ्य लक्ष्य पूरा' : `${completedCount} नियमित चेकअप पूरे`, achievement: `अगला लक्ष्य: ${completedCount + 1} नियमित चेकअप` }
+    : { title: 'You are taking good care of your health!', description: completedCount === 1 ? '🎉 First health goal completed' : `${completedCount} regular check-ups completed`, achievement: `Next goal: ${completedCount + 1} regular check-ups` };
+};
 
 export const VdaTab: React.FC<VdaTabProps> = ({
   patient,
@@ -110,6 +122,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   lang,
   messages,
   clinicalFollowUps,
+  followUpProgress,
   isProcessing,
   onSendMessage,
   onToggleMedicationTaken,
@@ -123,7 +136,6 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   const [speechTranscript, setSpeechTranscript] = useState('');
   const [voiceError, setVoiceError] = useState('');
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
-  const [showSymptomGrid, setShowSymptomGrid] = useState(false);
   const [showEmergencyDial, setShowEmergencyDial] = useState(false);
   const [followUpBusyId, setFollowUpBusyId] = useState<string | null>(null);
   const [followUpFeedback, setFollowUpFeedback] = useState('');
@@ -428,13 +440,6 @@ export const VdaTab: React.FC<VdaTabProps> = ({
     || voiceState === 'auto_sending'
     || voiceState === 'waiting_for_vda';
 
-  const handleSymptomClick = (symptomKey: string, symptomQuery: { hi: string; en: string; ta: string; kn: string }) => {
-    playChime('start');
-    const queryText = symptomQuery[lang] || symptomQuery.en;
-    onSendMessage(queryText);
-    setShowSymptomGrid(false);
-  };
-
   const renderAgentBadge = (agent?: string) => {
     switch (agent) {
       case 'medication':
@@ -479,97 +484,11 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   const patientDistrict = getLocalizedField(patient, 'district', lang);
   const patientState = getLocalizedField(patient, 'state', lang);
 
-  // Pictorial Symptoms list
-  const PICTORIAL_SYMPTOMS = [
-    {
-      id: 'headache',
-      icon: '🤕',
-      label: getTranslation(lang, 'headacheSymptom'),
-      queries: {
-        hi: 'मुझे तेज सिरदर्द और चक्कर आ रहे हैं, क्या करना चाहिए?',
-        en: 'I have a bad headache and dizziness. What should I do?',
-        ta: 'எனக்கு கடுமையான தலைவலி மற்றும் மயக்கம் உள்ளது. என்ன செய்ய வேண்டும்?',
-        kn: 'ನನಗೆ ತೀವ್ರ ತಲೆನೋವು ಮತ್ತು ತಲೆತಿರುಗುವಿಕೆ ಇದೆ. ಏನು ಮಾಡಬೇಕು?'
-      }
-    },
-    {
-      id: 'chestpain',
-      icon: '🫀',
-      label: getTranslation(lang, 'chestPainSymptom'),
-      queries: {
-        hi: 'मेरी छाती में भारीपन और तेज दर्द हो रहा है।',
-        en: 'I have severe chest tightness and left arm numbness.',
-        ta: 'எனக்கு நெஞ்சில் கடுமையான வலியும் அழுத்தமும் உள்ளது.',
-        kn: 'ನನಗೆ ಎದೆ ಬಿಗಿತ ಮತ್ತು ಎಡಗೈ ನೋವು ಇದೆ.'
-      }
-    },
-    {
-      id: 'stomach',
-      icon: '🤢',
-      label: getTranslation(lang, 'stomachPainSymptom'),
-      queries: {
-        hi: 'मेरे पेट में दर्द और गैस की समस्या हो रही है।',
-        en: 'I have stomach ache and acidity after meals.',
-        ta: 'எனக்கு வயிற்று வலி மற்றும் வாயு தொல்லை உள்ளது.',
-        kn: 'ನನಗೆ ಹೊಟ್ಟೆ ನೋವು ಮತ್ತು ಗ್ಯಾಸ್ಟ್ರಿಕ್ ಸಮಸ್ಯೆ ಇದೆ.'
-      }
-    },
-    {
-      id: 'fever',
-      icon: '🤒',
-      label: getTranslation(lang, 'feverSymptom'),
-      queries: {
-        hi: 'मुझे तेज बुखार और बदन में दर्द है।',
-        en: 'I have high fever and severe body aches.',
-        ta: 'எனக்கு அதிக காய்ச்சலும் உடல் வலியும் உள்ளது.',
-        kn: 'ನನಗೆ ತೀವ್ರ ಜ್ವರ ಮತ್ತು ಮೈಕೈ ನೋವು ಇದೆ.'
-      }
-    },
-    {
-      id: 'sugar',
-      icon: '🍯',
-      label: getTranslation(lang, 'sugarThirstSymptom'),
-      queries: {
-        hi: 'मुझे बहुत ज्यादा प्यास लग रही है और बार-बार पेशाब आ रहा है।',
-        en: 'I feel excessive thirst and frequent urination.',
-        ta: 'எனக்கு அதிக தாகமும் அடிக்கடி சிறுநீரும் வருகிறது.',
-        kn: 'ನನಗೆ ಅತಿಯಾದ ಬಾಯಾರಿಕೆ ಮತ್ತು ಪದೇ ಪದೇ ಮೂತ್ರ ಬರುತ್ತಿದೆ.'
-      }
-    },
-    {
-      id: 'foot',
-      icon: '🦵',
-      label: getTranslation(lang, 'footPainSymptom'),
-      queries: {
-        hi: 'मेरे पैरों में झनझनाहट और सुन्नता महसूस होती है।',
-        en: 'I have tingling and numbness in my feet.',
-        ta: 'எனது கால்களில் மரத்துப்போகும் உணர்வு உள்ளது.',
-        kn: 'ನನ್ನ ಪಾದಗಳಲ್ಲಿ ಜುಮ್ಮೆನಿಸುವಿಕೆ ಮತ್ತು ಸ್ಪರ್ಶವಿಲ್ಲದಂತಿದೆ.'
-      }
-    },
-    {
-      id: 'pregnancy',
-      icon: '🤰',
-      label: getTranslation(lang, 'pregnancySymptom'),
-      queries: {
-        hi: 'गर्भावस्था में पोषण और आयरन फोलिक एसिड गोली का समय बताएं।',
-        en: 'Explain maternal care, IFA tablets, and checkup schedule.',
-        ta: 'கர்ப்பகால பராமரிப்பு மற்றும் இரும்பு சத்து மாத்திரை விவரம் சொல்லுங்கள்.',
-        kn: 'ಗರ್ಭಿಣಿಯರ ಆರೈಕೆ ಮತ್ತು ಪೌಷ್ಟಿಕಾಂಶದ ವಿವರಗಳನ್ನು ತಿಳಿಸಿ.'
-      }
-    },
-    {
-      id: 'wound',
-      icon: '🩹',
-      label: getTranslation(lang, 'woundSymptom'),
-      queries: {
-        hi: 'चोट या घाव की प्राथमिक चिकित्सा कैसे करें?',
-        en: 'How to do first aid for a cut or wound?',
-        ta: 'காயத்திற்கு முதலுதவி செய்வது எப்படி?',
-        kn: 'ಗಾಯಕ್ಕೆ ಪ್ರಥಮ ಚಿಕಿತ್ಸೆ ಹೇಗೆ ಮಾಡುವುದು?'
-      }
-    }
-  ];
+  const completedFollowUpCount = followUpProgress.completedFollowUpCount;
+  const progressCopy = healthProgressCopy(completedFollowUpCount, lang);
+  const progressMilestones = completedFollowUpCount === 0
+    ? [1, 2, 3]
+    : Array.from({ length: 3 }, (_, index) => Math.max(1, completedFollowUpCount - 1) + index);
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden relative">
@@ -622,98 +541,33 @@ export const VdaTab: React.FC<VdaTabProps> = ({
         ref={chatScrollRef}
         className="flex-1 overflow-y-auto px-3.5 sm:px-4 py-3.5 space-y-3.5 scroll-smooth min-h-0"
       >
-        {/* AAROGYA SETU 2.0 STATUS SHIELD BANNER */}
-        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 via-slate-900 to-teal-950/80 border border-emerald-500/40 relative overflow-hidden shadow-lg space-y-2.5">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0">
-                <ShieldCheck className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <h2 className="text-xs font-extrabold text-white tracking-tight">
-                    {getTranslation(lang, 'aarogyaStatusSafe')}
-                  </h2>
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                  </span>
+        {/* Real completed clinical follow-ups only; no medication adherence or inferred monthly streak. */}
+        <section className="rounded-2xl border border-emerald-500/35 bg-gradient-to-r from-emerald-950/75 via-slate-900 to-teal-950/70 p-3.5 shadow-lg" aria-label="Health progress">
+          <div className="flex items-start gap-2.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300">
+              <Activity className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-sm font-extrabold tracking-tight text-white">{progressCopy.title}</h2>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-emerald-100/85">{progressCopy.description}</p>
+            </div>
+          </div>
+          <div className="mt-3 flex items-center gap-2" aria-label={`${completedFollowUpCount} completed checkups`}>
+            {progressMilestones.map((milestone, index) => {
+              const complete = milestone <= completedFollowUpCount;
+              const currentGoal = milestone === completedFollowUpCount + 1;
+              return <React.Fragment key={milestone}>
+                {index > 0 && <div className={`h-0.5 flex-1 ${complete ? 'bg-emerald-400' : 'bg-slate-700'}`} />}
+                <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${complete ? 'border-emerald-400 bg-emerald-500 text-slate-950' : currentGoal ? 'border-emerald-300 bg-emerald-500/15 text-emerald-200' : 'border-slate-600 bg-slate-900 text-slate-400'}`}>
+                  {complete ? '✓' : milestone}
                 </div>
-                <p className="text-[10.5px] text-emerald-300/90 leading-tight truncate">
-                  {getTranslation(lang, 'aarogyaStatusDetail')}
-                </p>
-              </div>
-            </div>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30 whitespace-nowrap flex-shrink-0">
-              {getTranslation(lang, 'abhaVerifiedBadge')}
-            </span>
+              </React.Fragment>;
+            })}
           </div>
-
-          {/* Quick Speed Dial Bar in Banner */}
-          <div className="pt-2 border-t border-emerald-500/20 grid grid-cols-4 gap-1.5 sm:gap-2 text-center">
-            <a
-              href="tel:108"
-              className="py-1.5 px-1 rounded-xl bg-slate-950/70 hover:bg-slate-950 text-emerald-300 font-bold text-[11px] flex items-center justify-center gap-1 border border-emerald-500/20 transition-all active:scale-95"
-            >
-              <span>🚑</span>
-              <span>108</span>
-            </a>
-            <a
-              href="tel:104"
-              className="py-1.5 px-1 rounded-xl bg-slate-950/70 hover:bg-slate-950 text-emerald-300 font-bold text-[11px] flex items-center justify-center gap-1 border border-emerald-500/20 transition-all active:scale-95"
-            >
-              <span>🩺</span>
-              <span>104</span>
-            </a>
-            <a
-              href="tel:112"
-              className="py-1.5 px-1 rounded-xl bg-slate-950/70 hover:bg-slate-950 text-red-300 font-bold text-[11px] flex items-center justify-center gap-1 border border-red-500/20 transition-all active:scale-95"
-            >
-              <span>🚨</span>
-              <span>112</span>
-            </a>
-            <a
-              href="tel:14555"
-              className="py-1.5 px-1 rounded-xl bg-slate-950/70 hover:bg-slate-950 text-amber-300 font-bold text-[11px] flex items-center justify-center gap-1 border border-amber-500/20 transition-all active:scale-95"
-            >
-              <span>💳</span>
-              <span>14555</span>
-            </a>
+          <div className="mt-2 inline-flex rounded-lg bg-emerald-500/12 px-2.5 py-1 text-[11px] font-semibold text-emerald-200">
+            🏆 {progressCopy.achievement}
           </div>
-        </div>
-
-        {/* PICTORIAL SYMPTOM ACCESSIBILITY SELECTOR */}
-        <div className="rounded-2xl bg-slate-900 border border-slate-800 overflow-hidden">
-          <button
-            onClick={() => setShowSymptomGrid(!showSymptomGrid)}
-            className="w-full p-3 flex items-center justify-between text-left hover:bg-slate-800/60 transition-colors"
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-base">🩺</span>
-              <div>
-                <h3 className="text-xs font-bold text-white">{getTranslation(lang, 'symptomGridTitle')}</h3>
-                <p className="text-[10px] text-slate-400">{getTranslation(lang, 'symptomGridSub')}</p>
-              </div>
-            </div>
-            {showSymptomGrid ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
-          </button>
-
-          {showSymptomGrid && (
-            <div className="p-3 pt-0 grid grid-cols-2 sm:grid-cols-4 gap-2 border-t border-slate-800/80 mt-1">
-              {PICTORIAL_SYMPTOMS.map((sym) => (
-                <button
-                  key={sym.id}
-                  onClick={() => handleSymptomClick(sym.id, sym.queries)}
-                  className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 hover:border-emerald-500/50 text-left transition-all active:scale-95 flex flex-col gap-1"
-                >
-                  <span className="text-xl">{sym.icon}</span>
-                  <span className="text-xs font-bold text-white leading-tight">{sym.label}</span>
-                  <span className="text-[9px] text-emerald-400 font-semibold">{getTranslation(lang, 'askAboutSymptom')}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        </section>
 
         {/* Message Bubble Stream */}
         {messages.map((msg, index) => {

@@ -206,7 +206,7 @@ class ApiService {
     return this.request<FollowUpListResponse>(
       `/api/v1/sessions/${encodeURIComponent(sessionId)}/follow-ups`,
       { method: 'GET' },
-      { asOfDate: '', timezone: '', followUps: [] },
+      { asOfDate: '', timezone: '', followUps: [], progress: { completedFollowUpCount: 0 } },
     );
   }
 

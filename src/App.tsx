@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Sparkles, FileText, Building2, User } from 'lucide-react';
-import { ChatMessage, ClinicalFollowUp, ClinicalReviewState, FhirCondition, FhirDocument, FhirMedication, FhirObservation, LanguageCode, PatientDemographics } from './types';
+import { ChatMessage, ClinicalFollowUp, ClinicalReviewState, FhirCondition, FhirDocument, FhirMedication, FhirObservation, FollowUpProgress, LanguageCode, PatientDemographics } from './types';
 import { SYNTHETIC_PATIENTS, FACILITIES_LIST, HEALTH_SCHEMES_LIST } from './data/syntheticData';
 import { getTranslation, playChime } from './utils/i18n';
 import { apiService } from './services/api';
@@ -25,6 +25,7 @@ export default function App() {
   // Backend VDA Session State
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [clinicalFollowUps, setClinicalFollowUps] = useState<ClinicalFollowUp[]>([]);
+  const [followUpProgress, setFollowUpProgress] = useState<FollowUpProgress>({ completedFollowUpCount: 0 });
 
   // App Flow Modals
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
@@ -40,7 +41,6 @@ export default function App() {
 
   // Clinical Escalation Takeover State
   const [clinicalReview, setClinicalReview] = useState<ClinicalReviewState | null>(null);
-  const [emergencyInstruction, setEmergencyInstruction] = useState('');
 
   // Initialize Auth & Session on mount
   React.useEffect(() => {
@@ -51,6 +51,7 @@ export default function App() {
         setActiveSessionId(sessionRes.session_id);
         const followUpResponse = await apiService.getClinicalFollowUps(sessionRes.session_id);
         setClinicalFollowUps(followUpResponse.followUps);
+        setFollowUpProgress(followUpResponse.progress || { completedFollowUpCount: 0 });
       }
     };
     initAppSession();
@@ -105,7 +106,6 @@ export default function App() {
     setDocuments(newProfile.documents);
     setConsents(newProfile.consents);
     setClinicalReview(null);
-    setEmergencyInstruction('');
 
     // Call backend session creation API for selected patient
     const sessionRes = await apiService.createPatientSession(key);
@@ -113,9 +113,11 @@ export default function App() {
       setActiveSessionId(sessionRes.session_id);
       const followUpResponse = await apiService.getClinicalFollowUps(sessionRes.session_id);
       setClinicalFollowUps(followUpResponse.followUps);
+      setFollowUpProgress(followUpResponse.progress || { completedFollowUpCount: 0 });
     } else {
       setActiveSessionId(null);
       setClinicalFollowUps([]);
+      setFollowUpProgress({ completedFollowUpCount: 0 });
     }
 
     setMessages([
@@ -215,9 +217,6 @@ export default function App() {
       if (currentSessionId && (result.escalationDetected || result.responseType === 'clinical-review')) {
         const state = await apiService.getClinicalReviewState(currentSessionId);
         setClinicalReview(state);
-        if (result.escalationDetected) {
-          setEmergencyInstruction(lang === 'hi' ? (result.message.textHi || result.message.text) : result.message.text);
-        }
       }
     } catch {
       setMessages((prev) => [...prev, {
@@ -236,7 +235,9 @@ export default function App() {
   const handleClinicalFollowUpAttendance = async (followUpId: string, attended: boolean) => {
     if (!activeSessionId) throw new Error('NO_ACTIVE_SESSION');
     const result = await apiService.recordClinicalFollowUpAttendance(activeSessionId, followUpId, attended);
-    setClinicalFollowUps((previous) => previous.filter((followUp) => followUp.id !== followUpId));
+    const followUpResponse = await apiService.getClinicalFollowUps(activeSessionId);
+    setClinicalFollowUps(followUpResponse.followUps);
+    setFollowUpProgress(followUpResponse.progress || { completedFollowUpCount: 0 });
     return result.message;
   };
 
@@ -313,7 +314,6 @@ export default function App() {
         {clinicalReview?.reviewRequested && (
           <EscalationModal
             review={clinicalReview}
-            emergencyInstruction={emergencyInstruction || (lang === 'hi' ? 'आपको तुरंत emergency medical care लेनी चाहिए।' : 'You should seek emergency medical care immediately.')}
             lang={lang}
             onSendMessageToClinician={handleClinicalMessage}
             onOpenTeleconsultation={openTeleconsultation}
@@ -330,6 +330,7 @@ export default function App() {
               lang={lang}
               messages={messages}
               clinicalFollowUps={clinicalFollowUps}
+              followUpProgress={followUpProgress}
               isProcessing={isProcessingMessage}
               onSendMessage={handleSendMessage}
               onToggleMedicationTaken={handleToggleMedication}
