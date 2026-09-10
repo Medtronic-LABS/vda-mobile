@@ -47,7 +47,7 @@ describe('VDA Mobile — EscalationModal Component', () => {
     expect(screen.getByText(/Clinical assistance/i)).toBeInTheDocument();
     expect(screen.getByText(/Connecting to the clinical team/i)).toBeInTheDocument();
     expect(screen.getByText('I have severe chest pain')).toBeInTheDocument();
-    expect(screen.getByText('Please remain calm and call 108')).toBeInTheDocument();
+    expect(screen.getByText(/If your condition is serious or getting worse/i)).toBeInTheDocument();
   });
 
   it('should render connected state when clinician responds', () => {
@@ -112,8 +112,8 @@ describe('VDA Mobile — EscalationModal Component', () => {
       />
     );
 
-    expect(screen.getByText(/A clinician has not joined this chat yet/i)).toBeInTheDocument();
-    const teleconsultBtn = screen.getByText(/Consult on eSanjeevani/i);
+    expect(screen.getByText(/The clinical team has not joined yet/i)).toBeInTheDocument();
+    const teleconsultBtn = screen.getByText(/Talk to eSanjeevani/i);
     expect(teleconsultBtn).toBeInTheDocument();
 
     fireEvent.click(teleconsultBtn);
@@ -151,7 +151,7 @@ describe('VDA Mobile — EscalationModal Component', () => {
       />
     );
 
-    const toggleBtn = screen.getByText(/Nearby hospitals/i);
+    const toggleBtn = screen.getByRole('button', { name: /Nearby hospitals/i });
     fireEvent.click(toggleBtn);
 
     expect(screen.getByText('AIIMS Trauma Centre')).toBeInTheDocument();

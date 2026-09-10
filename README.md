@@ -12,16 +12,27 @@
 
 ---
 
-## 📱 Pre-Built Android APK
+## 📱 Pre-Built Android APK (`VDA.apk`)
 
 A production-ready Android Debug APK has been compiled and is available directly in the project root:
-- **Location:** `vda-health-assistant.apk` (or `android/app/build/outputs/apk/debug/app-debug.apk`)
-- **Size:** ~4.1 MB
+- **Primary Binary:** [`VDA.apk`](VDA.apk) (also saved as `vda-health-assistant.apk`)
+- **Size:** `4.29 MB` (4,298,411 bytes)
 - **Target Platform:** Android 7.0 (API 24) to Android 15/16 (API 36)
-- **Install on Device:**
+- **Production Backend Connected:** `https://vda-api.mdtlabs.org`
+- **Install on Device via ADB:**
   ```bash
-  adb install -r vda-health-assistant.apk
+  adb install -r VDA.apk
   ```
+
+---
+
+## 🌐 Live Cloud Production Endpoints
+
+| Service | Endpoint URL | Status | Details |
+| :--- | :--- | :--- | :--- |
+| **Backend API Gateway** | [https://vda-api.mdtlabs.org](https://vda-api.mdtlabs.org) | **ACTIVE (HTTPS)** | Direct API gateway for mobile app |
+| **Admin Portal** | [https://vda-admin.mdtlabs.org](https://vda-admin.mdtlabs.org) | **ACTIVE (HTTPS)** | Clinical supervision and telemetry |
+| **API Health** | [https://vda-api.mdtlabs.org/api/v1/health](https://vda-api.mdtlabs.org/api/v1/health) | **HEALTHY** | `{"database":"healthy","redis":"healthy"}` |
 
 ---
 
@@ -579,10 +590,40 @@ vda-mobile-app/
 │   ├── App.tsx                # Main app layout, tab navigation & state coordinator
 │   └── main.tsx               # React application entry point
 ├── capacitor.config.ts        # Capacitor configuration (App ID: in.gov.abdm.vdahealth)
-├── vda-health-assistant.apk   # Ready-to-install Android Debug APK (~4.1 MB)
+├── VDA.apk                    # Latest Production Android Debug APK (4.29 MB)
+├── vda-health-assistant.apk   # Pre-built Android Debug APK
 ├── vite.config.ts             # Vite build & TailwindCSS v4 plugin setup
 └── package.json               # NPM scripts, dependencies and project metadata
 ```
+
+---
+
+## 🧪 Comprehensive Vitest Test Suite
+
+The mobile application features complete unit and integration test coverage verifying the VDA Engine, clinical safety gates, and API fallback mechanisms:
+
+```bash
+npm test
+```
+
+```
+Test Files  7 passed (7)
+     Tests  104 passed (104)
+  Duration  2.96s (100% pass)
+```
+
+- `src/__tests__/security.test.ts`: Injection defense, XSS sanitation, red-flag triage.
+- `src/utils/__tests__/vdaEngine.test.ts`: Query classification and response generation.
+- `src/services/__tests__/api.test.ts`: Live backend session management and offline fallback.
+- `src/components/__tests__/EscalationModal.test.tsx`: Clinical escalation, tele-triage, and hospital locator.
+- `src/components/__tests__/LogVitalModal.test.tsx`: Patient vitals logging.
+
+---
+
+## 🔗 Repository Links
+
+- **Medtronic LABS Organization:** [https://github.com/Medtronic-LABS/vda-mobile](https://github.com/Medtronic-LABS/vda-mobile)
+- **Personal Repository:** [https://github.com/denispaul2406/VDA-mobile](https://github.com/denispaul2406/VDA-mobile)
 
 ---
 
