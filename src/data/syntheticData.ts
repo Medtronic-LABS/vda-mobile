@@ -1,0 +1,266 @@
+import {
+  JanAushadhiItem,
+  BloodStockItem 
+} from '../types';
+
+// Legacy showcase-only fixtures. The active patient runtime must not import these.
+export const FACILITIES_LIST = [
+  {
+    id: 'fac-hp-01',
+    name: 'District Hospital Solan',
+    nameHi: 'जिला अस्पताल सोलन (हिमाचल प्रदेश)',
+    nameTa: 'மாவட்ட மருத்துவமனை சோலன்',
+    nameKn: 'ಜಿಲ್ಲಾ ಆಸ್ಪತ್ರೆ ಸೋಲನ್',
+    type: 'District Hospital',
+    distanceKm: 2.4,
+    address: 'Mall Road, Solan, Himachal Pradesh 173212',
+    addressHi: 'माल रोड, सोलन, हिमाचल प्रदेश',
+    phone: '+91 1792 223638',
+    opdTimings: '09:00 AM - 03:00 PM (Mon-Sat)',
+    hasAbdmQrCheckin: true,
+    hasEmergency24x7: true,
+    availableBeds: 45,
+    schemesAccepted: ['Ayushman Bharat PM-JAY', 'HIMCARE Himachal Scheme', 'Free Essential Drugs']
+  },
+  {
+    id: 'fac-hp-02',
+    name: 'Indira Gandhi Medical College & Hospital (IGMC Shimla)',
+    nameHi: 'आईजीएमसी शिमला (शीर्ष चिकित्सा महाविद्यालय व अस्पताल)',
+    nameTa: 'இந்திரா காந்தி மருத்துவக் கல்லூரி சிம்லா',
+    nameKn: 'ಇಂದಿರಾ ಗಾಂಧಿ ವೈದ್ಯಕೀಯ ಕಾಲೇಜು ಶಿಮ್ಲಾ',
+    type: 'Tertiary AIIMS',
+    distanceKm: 46,
+    address: 'Ridge Road, Snowdown, Shimla, Himachal Pradesh 171001',
+    addressHi: 'स्नोडाउन, शिमला, हिमाचल प्रदेश',
+    phone: '+91 177 2804251',
+    opdTimings: '08:30 AM - 04:00 PM',
+    hasAbdmQrCheckin: true,
+    hasEmergency24x7: true,
+    availableBeds: 180,
+    schemesAccepted: ['Ayushman Bharat PM-JAY', 'HIMCARE', 'CGHS', 'Emergency Trauma Care']
+  },
+  {
+    id: 'fac-hr-01',
+    name: 'Civil Hospital Gurugram (Sector 10)',
+    nameHi: 'नागरिक अस्पताल गुरुग्राम (सेक्टर 10, हरियाणा)',
+    nameTa: 'குருகிராம் சிவில் மருத்துவமனை',
+    nameKn: 'ಗುರುಗ್ರಾಮ ಸಿವಿಲ್ ಆಸ್ಪತ್ರೆ',
+    type: 'District Hospital',
+    distanceKm: 3.8,
+    address: 'Sector 10A, Near Hero Honda Chowk, Gurugram, Haryana 122001',
+    addressHi: 'सेक्टर 10A, गुरुग्राम, हरियाणा',
+    phone: '+91 124 2322412',
+    opdTimings: '08:00 AM - 02:00 PM (Mon-Sat)',
+    hasAbdmQrCheckin: true,
+    hasEmergency24x7: true,
+    availableBeds: 72,
+    schemesAccepted: ['Ayushman Bharat PM-JAY', 'Chirayu Haryana Scheme', 'Nirogi Haryana']
+  },
+  {
+    id: 'fac-hr-02',
+    name: 'B.K. Civil Hospital Faridabad',
+    nameHi: 'बी.के. नागरिक अस्पताल फरीदाबाद',
+    nameTa: 'பரிதாபாத் பி.கே. சிவில் மருத்துவமனை',
+    nameKn: 'ಫರಿದಾಬಾದ್ ಸಿವಿಲ್ ಆಸ್ಪತ್ರೆ',
+    type: 'District Hospital',
+    distanceKm: 5.2,
+    address: 'NIT 1, Near Neelam Flyover, Faridabad, Haryana 121001',
+    addressHi: 'एनआईटी 1, फरीदाबाद, हरियाणा',
+    phone: '+91 129 2415664',
+    opdTimings: '08:00 AM - 03:00 PM',
+    hasAbdmQrCheckin: true,
+    hasEmergency24x7: true,
+    availableBeds: 60,
+    schemesAccepted: ['Ayushman Bharat PM-JAY', 'Chirayu Haryana', 'PM National Dialysis']
+  },
+  {
+    id: 'fac-01',
+    name: 'AIIMS New Delhi (Apex Care & Tele-Triage)',
+    nameHi: 'एम्स नई दिल्ली (शीर्ष अस्पताल व टेली-परामर्श)',
+    nameTa: 'எய்ம்ஸ் புது தில்லி (முதன்மை மருத்துவமனை & டெலி-ட்ரையേജ്)',
+    nameKn: 'ಏಮ್ಸ್ ನವದೆಹಲಿ (ಪ್ರಮುಖ ಆಸ್ಪತ್ರೆ ಮತ್ತು ಟೆಲಿ-ಸಮಾಲೋಚನೆ)',
+    type: 'Tertiary AIIMS',
+    distanceKm: 120,
+    address: 'Sri Aurobindo Marg, Ansari Nagar, New Delhi 110029',
+    addressHi: 'श्री अरबिंदो मार्ग, अंसारी नगर, नई दिल्ली',
+    phone: '+91 11 26588500',
+    opdTimings: '08:00 AM - 04:00 PM',
+    hasAbdmQrCheckin: true,
+    hasEmergency24x7: true,
+    availableBeds: 110,
+    schemesAccepted: ['Ayushman Bharat PM-JAY', 'CGHS', 'ECHS', 'AIIMS Poor Patient Fund']
+  },
+  {
+    id: 'fac-04',
+    name: 'Pradhan Mantri Jan Aushadhi Kendra #5512',
+    nameHi: 'प्रधानमंत्री जन औषधि केंद्र #5512 (सस्ती दवाएं)',
+    nameTa: 'பிரதான் மந்திரி மக்கள் மருந்தகம் #5512',
+    nameKn: 'ಪ್ರಧಾನ ಮಂತ್ರಿ ಜನ ಔಷಧಿ ಕೇಂದ್ರ #5512',
+    type: 'Diagnostic Lab',
+    distanceKm: 1.2,
+    address: 'Near Civil Hospital Complex, Main Market',
+    addressHi: 'सिविल अस्पताल परिसर के पास, मुख्य बाजार',
+    phone: '+91 98160 44321',
+    opdTimings: '08:00 AM - 09:00 PM (All Days)',
+    hasAbdmQrCheckin: true,
+    hasEmergency24x7: false,
+    schemesAccepted: ['Generic Medicines up to 90% discount', 'Digital Prescription Dispense']
+  },
+  {
+    id: 'fac-05',
+    name: 'Red Cross Regional Blood Centre & Bank',
+    nameHi: 'रेड क्रॉस क्षेत्रीय ब्लड बैंक',
+    nameTa: 'ரெட் கிராஸ் இரத்த வங்கி',
+    nameKn: 'ರೆಡ್ ಕ್ರಾಸ್ ರಕ್ತ ನಿಧಿ',
+    type: 'Blood Bank',
+    distanceKm: 2.1,
+    address: 'Civil Hospital Campus',
+    addressHi: 'अस्पताल परिसर',
+    phone: '+91 1792 224190',
+    opdTimings: '24 Hours Emergency Service',
+    hasAbdmQrCheckin: true,
+    hasEmergency24x7: true,
+    schemesAccepted: ['ABDM e-RaktKosh Live Inventory', 'Voluntary Blood Donation']
+  }
+];
+
+export const HEALTH_SCHEMES_LIST = [
+  {
+    id: 'scheme-01',
+    name: 'Ayushman Bharat Pradhan Mantri Jan Arogya Yojana (PM-JAY)',
+    nameHi: 'आयुष्मान भारत प्रधानमंत्री जन आरोग्य योजना (PM-JAY)',
+    nameTa: 'ஆயுஷ்மான் பாரத் பிரதம மந்திரி மக்கள் ஆரோக்கிய திட்டம் (PM-JAY)',
+    nameKn: 'ಆಯುಷ್ಮಾನ್ ಭಾರತ್ ಪ್ರಧಾನ ಮಂತ್ರಿ ಜನ ಆರೋಗ್ಯ ಯೋಜನೆ (PM-JAY)',
+    shortCode: 'PM-JAY',
+    category: 'Universal Health Insurance',
+    description: 'Provides cashless annual coverage of ₹5,00,000 per family for secondary and tertiary care hospitalization across all empaneled public and private hospitals across India.',
+    descriptionHi: 'प्रत्येक पात्र परिवार को प्रति वर्ष ₹5,00,000 तक का मुफ्त व कैशलेस अस्पताल इलाज पूरे भारत में मिलता है।',
+    coverageAmount: '₹5,00,000 / year / family',
+    eligibility: 'SECC 2011 identified rural/urban poor families + all senior citizens aged 70+ irrespective of income.',
+    eligibilityHi: 'SECC सूची में दर्ज परिवार एवं 70 वर्ष से अधिक उम्र के सभी वरिष्ठ नागरिक।',
+    requiredDocuments: ['Aadhaar Card', 'Ration Card', 'ABHA Number'],
+    helpline: '14555'
+  },
+  {
+    id: 'scheme-hp-01',
+    name: 'Mukhya Mantri Himachal Health Care Scheme (HIMCARE)',
+    nameHi: 'मुख्यमंत्री हिमाचल हेल्थ केयर योजना (HIMCARE)',
+    nameTa: 'ஹிம்கேர் திட்டம் (இமாச்சல பிரதேசம்)',
+    nameKn: 'ಹಿಮ್‌ಕೇರ್ ಯೋಜನೆ (ಹಿಮಾಚಲ ಪ್ರದೇಶ)',
+    shortCode: 'HIMCARE',
+    category: 'State Cashless Hospitalization',
+    description: 'Covers families in Himachal Pradesh not eligible under PM-JAY for up to ₹5,00,000 cashless hospitalization treatment per family per year.',
+    descriptionHi: 'हिमाचल प्रदेश के उन सभी परिवारों को ₹5,00,000 तक का मुफ्त इलाज जो आयुष्मान भारत में शामिल नहीं हैं।',
+    coverageAmount: '₹5,00,000 / year / family',
+    eligibility: 'Residents of Himachal Pradesh with valid ration card not covered under Ayushman Bharat or government employee schemes.',
+    eligibilityHi: 'हिमाचल प्रदेश के निवासी जिनके पास राशन कार्ड है।',
+    requiredDocuments: ['Himachal Ration Card', 'Aadhaar Card', 'ABHA ID'],
+    helpline: '104'
+  },
+  {
+    id: 'scheme-hr-01',
+    name: 'Ayushman Bharat - Chirayu Haryana Scheme',
+    nameHi: 'चिरायु हरियाणा योजना (₹5 लाख मुफ्त इलाज)',
+    nameTa: 'சிராயு ஹரியானா திட்டம்',
+    nameKn: 'ಚಿರಾಯು ಹರಿಯಾಣ ಯೋಜನೆ',
+    shortCode: 'CHIRAYU',
+    category: 'State Cashless Hospitalization',
+    description: 'Expanded coverage for Haryana families with annual verified income up to ₹3,00,000 under Parivar Pehchan Patra (PPP) for ₹5 lakh cashless medical care.',
+    descriptionHi: 'हरियाणा के परिवारों (वार्षिक आय ₹3 लाख तक) को परिवार पहचान पत्र के तहत ₹5 लाख तक का कैशलेस इलाज।',
+    coverageAmount: '₹5,00,000 / year / family',
+    eligibility: 'Haryana residents with Parivar Pehchan Patra (PPP) family income up to ₹3.00 Lakh.',
+    eligibilityHi: 'हरियाणा परिवार पहचान पत्र (PPP) धारक परिवार।',
+    requiredDocuments: ['Parivar Pehchan Patra (PPP ID)', 'Aadhaar Card', 'ABHA Card'],
+    helpline: '104 / 14555'
+  },
+  {
+    id: 'scheme-02',
+    name: 'Pradhan Mantri National Dialysis Programme (PMNDP)',
+    nameHi: 'प्रधानमंत्री राष्ट्रीय डायलिसिस कार्यक्रम',
+    shortCode: 'PMNDP',
+    category: 'Chronic Kidney Disease',
+    description: 'Free Hemodialysis and Peritoneal Dialysis services for BPL/PM-JAY patients at all District Hospitals across India.',
+    descriptionHi: 'गरीबी रेखा व आयुष्मान लाभार्थियों को जिला अस्पतालों में बिल्कुल मुफ्त डायलिसिस की सुविधा।',
+    coverageAmount: '100% Free at District Hospitals',
+    eligibility: 'Patients diagnosed with End-Stage Renal Disease (ESRD) with BPL/PM-JAY card.',
+    eligibilityHi: 'गुर्दे की गंभीर बीमारी से पीड़ित मरीज।',
+    requiredDocuments: ['Nephrologist Prescription', 'ABHA ID', 'Aadhaar'],
+    helpline: '1800-180-1104'
+  },
+  {
+    id: 'scheme-03',
+    name: 'Pradhan Mantri Bharatiya Janaushadhi Pariyojana (PMBJP)',
+    nameHi: 'प्रधानमंत्री भारतीय जन औषधि परियोजना',
+    shortCode: 'PMBJP',
+    category: 'Affordable Medicines',
+    description: 'Provides high quality WHO-GMP certified generic medicines at 50% to 90% cheaper prices compared to branded medicines.',
+    descriptionHi: 'ब्रांडेड दवाओं की तुलना में 50% से 90% तक कम कीमत में उच्च गुणवत्ता वाली जेनेरिक दवाइयां।',
+    coverageAmount: 'Up to 90% savings on 2,000+ medicines',
+    eligibility: 'Open to all citizens with a valid doctor prescription.',
+    eligibilityHi: 'मान्य डॉक्टर के पर्चे वाले सभी नागरिकों के लिए खुली है।',
+    requiredDocuments: ['Doctor Prescription', 'ABHA ID'],
+    helpline: '1800-180-8080'
+  }
+];
+
+export const JAN_AUSHADHI_MEDICINES: JanAushadhiItem[] = [
+  {
+    id: 'ja-01',
+    genericName: 'Metformin Hydrochloride 500mg SR',
+    genericNameHi: 'मेटफॉर्मिन 500 मि.ग्रा.',
+    marketBrandName: 'Glycomet 500 / Glucophage',
+    dosage: '10 tablets strip',
+    marketPrice: 42,
+    janAushadhiPrice: 6.8,
+    savingsPercentage: 84,
+    category: 'Diabetes Care',
+    availableAtKendra: true
+  },
+  {
+    id: 'ja-02',
+    genericName: 'Telmisartan 40mg Tablet',
+    genericNameHi: 'टेल्मीसार्टन 40 मि.ग्रा.',
+    marketBrandName: 'Telma 40 / Micardis',
+    dosage: '10 tablets strip',
+    marketPrice: 96,
+    janAushadhiPrice: 14.2,
+    savingsPercentage: 85,
+    category: 'Cardiovascular / Blood Pressure',
+    availableAtKendra: true
+  },
+  {
+    id: 'ja-03',
+    genericName: 'Glimepiride 1mg Tablet',
+    genericNameHi: 'ग्लिमेपिराइड 1 मि.ग्रा.',
+    marketBrandName: 'Amaryl 1mg / Glimy',
+    dosage: '10 tablets strip',
+    marketPrice: 68,
+    janAushadhiPrice: 9.5,
+    savingsPercentage: 86,
+    category: 'Diabetes Care',
+    availableAtKendra: true
+  },
+  {
+    id: 'ja-04',
+    genericName: 'Atorvastatin 10mg Tablet',
+    genericNameHi: 'एटोरवास्टेटिन 10 मि.ग्रा. (कोलेस्ट्रॉल)',
+    marketBrandName: 'Atorva 10 / Lipitor',
+    dosage: '10 tablets strip',
+    marketPrice: 85,
+    janAushadhiPrice: 12.0,
+    savingsPercentage: 86,
+    category: 'Lipid / Cholesterol',
+    availableAtKendra: true
+  }
+];
+
+export const BLOOD_BANK_STOCK: BloodStockItem[] = [
+  { group: 'A+', unitsAvailable: 14, status: 'SUFFICIENT' },
+  { group: 'B+', unitsAvailable: 28, status: 'SUFFICIENT' },
+  { group: 'O+', unitsAvailable: 32, status: 'SUFFICIENT' },
+  { group: 'AB+', unitsAvailable: 8, status: 'MODERATE' },
+  { group: 'A-', unitsAvailable: 3, status: 'CRITICAL' },
+  { group: 'B-', unitsAvailable: 4, status: 'CRITICAL' },
+  { group: 'O-', unitsAvailable: 2, status: 'CRITICAL' },
+  { group: 'AB-', unitsAvailable: 1, status: 'CRITICAL' }
+];
