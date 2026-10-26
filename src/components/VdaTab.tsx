@@ -1,9 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, AlertTriangle, ShieldAlert, Sparkles, Phone, Paperclip, FileText, X, LoaderCircle, Bell } from 'lucide-react';
+import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, AlertTriangle, ShieldAlert, Sparkles, Phone, Paperclip, FileText, X, LoaderCircle, Bell, Camera as CameraIcon, Upload } from 'lucide-react';
+import { Camera, type MediaResult } from '@capacitor/camera';
+import { App as CapacitorApp } from '@capacitor/app';
+import { prescriptionCameraFile } from '../services/prescription-camera.service';
+import { buildSpokenPlan } from '../services/voice-spoken-text';
+import { voicePerformance } from '../services/voice-performance';
+import { microphoneConstraints, preferredRecordingMime } from '../services/voice-capture';
+import { waitForAudioPlayback } from '../services/voice-playback';
+import { VdaApiError } from '../services/api';
 import { ChatMessage, ClinicalReviewFacility, LanguageCode, PatientDemographics } from '../types';
 import { getTranslation, playChime } from '../utils/i18n';
-import { getChatMessageSpeechText, getChatMessageText, getQuickActionLabel, getCardTitle } from '../utils/vdaEngine';
+import { getChatMessageText, getQuickActionLabel, getCardTitle } from '../utils/vdaEngine';
 import { apiService } from '../services/api';
+import { Capacitor } from '@capacitor/core';
 import { MedicineReminderSnapshot, PatientAdherenceAction } from '../services/medicine-reminder.service';
 import { EmergencyFallbackCard } from './EmergencyFallbackCard';
 
@@ -14,7 +23,10 @@ interface VdaTabProps {
   medicineReminderSnapshot: MedicineReminderSnapshot;
   emergencyFallback: { nearbyFacilities: ClinicalReviewFacility[]; messageId: string } | null;
   isProcessing: boolean;
-  onSendMessage: (text: string, file?: File) => void;
+  onSendMessage: (text: string, file?: File) => void | Promise<void>;
+  activeReportId: string | null;
+  onReportQuestion: (text: string) => void;
+  onClearReport: () => void;
   activeReminderStepId: string | null;
   reminderStepStates: Record<string, 'ACTIVE' | 'ANSWERED' | 'EXPIRED'>;
   onReminderQuickAction: (stepId: string, action: string) => void;
@@ -36,6 +48,9 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   emergencyFallback,
   isProcessing,
   onSendMessage,
+  activeReportId,
+  onReportQuestion,
+  onClearReport,
   activeReminderStepId,
   reminderStepStates,
   onReminderQuickAction,
@@ -53,6 +68,14 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   const [speechTranscript, setSpeechTranscript] = useState('');
   const [voiceError, setVoiceError] = useState('');
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+  const [autoVoiceEnabled, setAutoVoiceEnabled] = useState(() => {
+    const saved = localStorage.getItem('vda-auto-voice');
+    return saved === 'on' || (saved !== 'off' && import.meta.env.VITE_AUTO_VOICE_DEFAULT !== 'off');
+  });
+  const [speechPreparing, setSpeechPreparing] = useState(false);
+  const [networkState, setNetworkState] = useState<'online' | 'offline' | 'restored'>(
+    () => navigator.onLine ? 'online' : 'offline',
+  );
   const [showEmergencyDial, setShowEmergencyDial] = useState(false);
   const [medicineActionBusy, setMedicineActionBusy] = useState<string | null>(null);
   const [medicineActionFeedback, setMedicineActionFeedback] = useState('');
@@ -61,12 +84,15 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingStartedAtRef = useRef<number | null>(null);
   const recordingCancelledRef = useRef(false);
+  const recordingLimitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const voiceAutoSendRef = useRef(false);
   const voiceTurnStartedRef = useRef(false);
   const playbackRef = useRef<HTMLAudioElement | null>(null);
+  const playbackUrlRef = useRef<string | null>(null);
+  const playbackCancelRef = useRef<(() => void) | null>(null);
   const audioBusyRef = useRef(false);
   const queuedAutoSpokenMessageIdsRef = useRef(new Set(messages.filter((message) => message.sender === 'vda').map((message) => message.id)));
-  const autoSpeechQueueRef = useRef<{ id: string; text: string }[]>([]);
+  const autoSpeechQueueRef = useRef<ChatMessage[]>([]);
   const isAutoSpeechDrainingRef = useRef(false);
   const playbackGenerationRef = useRef(0);
 
@@ -95,32 +121,56 @@ export const VdaTab: React.FC<VdaTabProps> = ({
 
   useEffect(() => () => {
     recordingCancelledRef.current = true;
+    if (recordingLimitRef.current) clearTimeout(recordingLimitRef.current);
     recorderRef.current?.stop();
     playbackRef.current?.pause();
+    playbackCancelRef.current?.();
+    if (playbackUrlRef.current) URL.revokeObjectURL(playbackUrlRef.current);
+    playbackUrlRef.current = null;
     playbackGenerationRef.current += 1;
     audioBusyRef.current = false;
+  }, []);
+
+  useEffect(() => {
+    let restoredTimer: ReturnType<typeof setTimeout> | null = null;
+    const offline = () => { if (restoredTimer) clearTimeout(restoredTimer); setNetworkState('offline'); };
+    const online = () => {
+      setNetworkState('restored');
+      if (restoredTimer) clearTimeout(restoredTimer);
+      restoredTimer = setTimeout(() => setNetworkState('online'), 6000);
+    };
+    window.addEventListener('offline', offline);
+    window.addEventListener('online', online);
+    return () => {
+      window.removeEventListener('offline', offline);
+      window.removeEventListener('online', online);
+      if (restoredTimer) clearTimeout(restoredTimer);
+    };
   }, []);
 
   const stopPlayback = () => {
     playbackGenerationRef.current += 1;
     playbackRef.current?.pause();
+    playbackCancelRef.current?.();
+    playbackCancelRef.current = null;
     playbackRef.current = null;
+    if (playbackUrlRef.current) URL.revokeObjectURL(playbackUrlRef.current);
+    playbackUrlRef.current = null;
     audioBusyRef.current = false;
+    setSpeechPreparing(false);
     setSpeakingMsgId(null);
   };
 
-  const playTextAudio = async (audioId: string, text: string, onFinished?: () => void) => {
-    if (speakingMsgId === audioId) {
-      stopPlayback();
-      return;
-    }
+  const playTextAudio = async (audioId: string, chunks: string[], automatic: boolean, onFinished?: () => void) => {
     if (audioBusyRef.current) return;
-    const textToSpeak = text.trim();
-    if (!textToSpeak) return;
+    if (!chunks.length) { onFinished?.(); return; }
     const playbackGeneration = ++playbackGenerationRef.current;
     const finish = () => {
       if (playbackGeneration !== playbackGenerationRef.current) return;
+      if (playbackUrlRef.current) URL.revokeObjectURL(playbackUrlRef.current);
+      playbackUrlRef.current = null;
       audioBusyRef.current = false;
+      setSpeechPreparing(false);
       playbackRef.current = null;
       setSpeakingMsgId(null);
       onFinished?.();
@@ -128,22 +178,33 @@ export const VdaTab: React.FC<VdaTabProps> = ({
     try {
       audioBusyRef.current = true;
       setSpeakingMsgId(audioId);
-      const audioBlob = await apiService.synthesizeVoice(textToSpeak.slice(0, 2500), lang);
-      if (playbackGeneration !== playbackGenerationRef.current) return;
-      const url = URL.createObjectURL(audioBlob);
-      const player = new Audio(url);
-      player.onended = () => {
+      for (const chunk of chunks) {
+        setSpeechPreparing(true);
+        const audioBlob = await apiService.synthesizeVoice(chunk, lang);
+        if (playbackGeneration !== playbackGenerationRef.current) return;
+        const url = URL.createObjectURL(audioBlob);
+        playbackUrlRef.current = url;
+        const player = new Audio(url);
+        playbackRef.current = player;
+        const playback = waitForAudioPlayback(player, () => {
+          if (playbackGeneration !== playbackGenerationRef.current) return;
+          setSpeechPreparing(false);
+          if (automatic) voicePerformance.firstAudiblePlayback();
+        });
+        playbackCancelRef.current = playback.cancel;
+        await playback.finished;
+        playbackCancelRef.current = null;
+        if (playbackGeneration !== playbackGenerationRef.current) return;
         URL.revokeObjectURL(url);
-        finish();
-      };
-      player.onerror = () => {
-        URL.revokeObjectURL(url);
-        finish();
-      };
-      playbackRef.current = player;
-      await player.play();
+        playbackUrlRef.current = null;
+        playbackRef.current = null;
+      }
+      finish();
     } catch {
+      if (playbackGeneration !== playbackGenerationRef.current) return;
       // Text remains usable; device speech is not a silent fallback.
+      autoSpeechQueueRef.current = [];
+      voicePerformance.failed('tts');
       finish();
       setVoiceError(lang === 'hi' ? 'आवाज़ चलाने में समस्या हुई। आप उत्तर पढ़ सकते हैं।' : 'Voice playback is unavailable. You can still read the response.');
     }
@@ -153,8 +214,10 @@ export const VdaTab: React.FC<VdaTabProps> = ({
     if (isAutoSpeechDrainingRef.current || audioBusyRef.current) return;
     const next = autoSpeechQueueRef.current.shift();
     if (!next) return;
+    const plan = buildSpokenPlan(next, lang, true);
+    if (!plan.chunks.length) { voicePerformance.clear(); drainAutoSpeechQueue(); return; }
     isAutoSpeechDrainingRef.current = true;
-    void playTextAudio(next.id, next.text, () => {
+    void playTextAudio(next.id, plan.chunks, true, () => {
       isAutoSpeechDrainingRef.current = false;
       drainAutoSpeechQueue();
     });
@@ -166,23 +229,50 @@ export const VdaTab: React.FC<VdaTabProps> = ({
     messages.forEach((message) => {
       if (message.sender !== 'vda' || queuedAutoSpokenMessageIdsRef.current.has(message.id)) return;
       queuedAutoSpokenMessageIdsRef.current.add(message.id);
-      autoSpeechQueueRef.current.push({ id: message.id, text: getChatMessageSpeechText(message, lang) });
+      if (autoVoiceEnabled) autoSpeechQueueRef.current.push(message);
     });
-    drainAutoSpeechQueue();
-  }, [messages, lang]);
+    if (autoVoiceEnabled) drainAutoSpeechQueue();
+    else voicePerformance.clear();
+  }, [messages, lang, autoVoiceEnabled]);
+
+  const lastUserMessageIdRef = useRef(messages.filter((message) => message.sender === 'user').at(-1)?.id);
+  useEffect(() => {
+    const latestId = messages.filter((message) => message.sender === 'user').at(-1)?.id;
+    if (latestId && latestId !== lastUserMessageIdRef.current) {
+      autoSpeechQueueRef.current = [];
+      isAutoSpeechDrainingRef.current = false;
+      stopPlayback();
+    }
+    lastUserMessageIdRef.current = latestId;
+  }, [messages]);
+
+  const toggleAutoVoice = () => {
+    const enabled = !autoVoiceEnabled;
+    setAutoVoiceEnabled(enabled);
+    localStorage.setItem('vda-auto-voice', enabled ? 'on' : 'off');
+    if (!enabled) {
+      autoSpeechQueueRef.current = [];
+      isAutoSpeechDrainingRef.current = false;
+      stopPlayback();
+    }
+  };
 
   const playResponseAudio = async (msg: ChatMessage) => {
     // Manual listening intentionally interrupts the automatic queue and plays the selected message.
     autoSpeechQueueRef.current = [];
     isAutoSpeechDrainingRef.current = false;
     stopPlayback();
-    await playTextAudio(msg.id, getChatMessageSpeechText(msg, lang));
+    await playTextAudio(msg.id, buildSpokenPlan(msg, lang, false).chunks, false);
   };
 
 
   const stopRecording = (cancel = false) => {
     if (!recorderRef.current) return;
+    if (recordingLimitRef.current) clearTimeout(recordingLimitRef.current);
+    recordingLimitRef.current = null;
     recordingCancelledRef.current = cancel;
+    if (!cancel) voicePerformance.microphoneStopped();
+    else voicePerformance.clear();
     recorderRef.current.stop();
   };
 
@@ -192,12 +282,25 @@ export const VdaTab: React.FC<VdaTabProps> = ({
       setVoiceError(lang === 'hi' ? 'इस डिवाइस पर रिकॉर्डिंग उपलब्ध नहीं है। कृपया लिखकर पूछें।' : 'Recording is unavailable on this device. Please type your question.');
       return;
     }
+    let stream: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const supported = navigator.mediaDevices.getSupportedConstraints?.();
+      stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints(supported || {}));
+      const preferredMime = preferredRecordingMime(MediaRecorder.isTypeSupported?.bind(MediaRecorder));
+      const recorder = new MediaRecorder(stream, preferredMime ? { mimeType: preferredMime } : undefined);
+      const settings = stream.getAudioTracks()[0]?.getSettings();
+      if (import.meta.env.DEV) console.debug('[VDA voice capture]', {
+        platform: Capacitor.getPlatform(), mimeType: recorder.mimeType,
+        sampleRate: settings?.sampleRate ?? null, channelCount: settings?.channelCount ?? null,
+        echoCancellation: settings?.echoCancellation ?? null,
+        noiseSuppression: settings?.noiseSuppression ?? null,
+        autoGainControl: settings?.autoGainControl ?? null,
+      });
       const chunks: Blob[] = [];
       recorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
       recorder.onstop = async () => {
+        if (recordingLimitRef.current) clearTimeout(recordingLimitRef.current);
+        recordingLimitRef.current = null;
         stream.getTracks().forEach((track) => track.stop());
         recorderRef.current = null;
         if (recordingCancelledRef.current) {
@@ -206,9 +309,10 @@ export const VdaTab: React.FC<VdaTabProps> = ({
           setVoiceState('idle');
           return;
         }
-        const durationMs = recordingStartedAtRef.current ? Date.now() - recordingStartedAtRef.current : undefined;
+        const durationMs = recordingStartedAtRef.current ? performance.now() - recordingStartedAtRef.current : undefined;
         recordingStartedAtRef.current = null;
-        if (chunks.length === 0) {
+        if (chunks.length === 0 || (durationMs !== undefined && durationMs < 350)) {
+          voicePerformance.clear();
           setVoiceState('error');
           setVoiceError(lang === 'hi' ? 'कोई आवाज़ रिकॉर्ड नहीं हुई। कृपया फिर से बोलें।' : 'No audio was recorded. Please try again.');
           return;
@@ -216,6 +320,11 @@ export const VdaTab: React.FC<VdaTabProps> = ({
         setVoiceState('transcribing');
         try {
           const audio = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+          if (import.meta.env.DEV) console.debug('[VDA voice recording]', {
+            platform: Capacitor.getPlatform(), mimeType: audio.type, bytes: audio.size,
+            durationMs: durationMs ?? null,
+          });
+          if (audio.size < 512) throw new Error('RECORDED_AUDIO_TOO_SMALL');
           const result = await apiService.transcribeVoice(audio, lang, durationMs);
           const transcript = result.transcript.trim();
           if (!transcript) throw new Error('Voice transcription returned no text.');
@@ -233,28 +342,41 @@ export const VdaTab: React.FC<VdaTabProps> = ({
             // Local reminder replies can complete before React observes an in-flight
             // parent turn. Mark the voice turn before dispatch so controls always reset.
             voiceTurnStartedRef.current = true;
-            onSendMessage(transcript);
+            if (activeReportId) onReportQuestion(transcript);
+            else onSendMessage(transcript);
             setInputText('');
             setVoiceState('waiting_for_vda');
           });
-        } catch {
+        } catch (error) {
+          voicePerformance.failed('stt');
           voiceAutoSendRef.current = false;
           setVoiceState('error');
-          setVoiceError(lang === 'hi' ? 'आवाज़ समझी नहीं जा सकी। कृपया लिखकर पूछें या फिर से बोलें।' : 'Your voice could not be understood. Please type your question or try again.');
+          const connectionFailure = error instanceof VdaApiError
+            && ['REQUEST_TIMEOUT', 'NETWORK_UNAVAILABLE'].includes(error.code || '');
+          setVoiceError(connectionFailure
+            ? (lang === 'hi' ? 'नेटवर्क धीमा है या बंद है। आवाज़ दोबारा भेजने से पहले कनेक्शन जाँचें।' : 'The connection is slow or unavailable. Check it before trying your voice again.')
+            : (lang === 'hi' ? 'आवाज़ समझी नहीं जा सकी। कृपया लिखकर पूछें या फिर से बोलें।' : 'Your voice could not be understood. Please type your question or try again.'));
           playChime('stop');
         }
       };
       recorderRef.current = recorder;
-      recordingStartedAtRef.current = Date.now();
+      recordingStartedAtRef.current = performance.now();
       recordingCancelledRef.current = false;
       setVoiceError('');
       setSpeechTranscript('');
       setVoiceState('recording');
       recorder.start();
+      recordingLimitRef.current = setTimeout(() => stopRecording(), 120_000);
       playChime('start');
-    } catch {
+    } catch (error) {
+      stream?.getTracks().forEach((track) => track.stop());
+      recorderRef.current = null;
+      voicePerformance.clear();
       setVoiceState('error');
-      setVoiceError(lang === 'hi' ? 'माइक्रोफोन अनुमति नहीं मिली। कृपया लिखकर पूछें।' : 'Microphone permission was not granted. Please type your question.');
+      const denied = error instanceof DOMException && error.name === 'NotAllowedError';
+      setVoiceError(denied
+        ? (lang === 'hi' ? 'माइक्रोफोन अनुमति नहीं मिली। कृपया लिखकर पूछें।' : 'Microphone permission was not granted. Please type your question.')
+        : (lang === 'hi' ? 'रिकॉर्डिंग शुरू नहीं हो सकी। कृपया फिर प्रयास करें या लिखकर पूछें।' : 'Recording could not start. Please try again or type your question.'));
     }
   };
 
@@ -314,6 +436,9 @@ export const VdaTab: React.FC<VdaTabProps> = ({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [cameraPhoto, setCameraPhoto] = useState<{ file: File; previewUrl: string } | null>(null);
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const [cameraUploading, setCameraUploading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -321,6 +446,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
     setAttachmentError(null);
     const file = e.target.files?.[0];
     if (!file) return;
+    if (activeReportId) onClearReport();
 
     const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
     if (!allowedTypes.includes(file.type.toLowerCase())) {
@@ -352,11 +478,74 @@ export const VdaTab: React.FC<VdaTabProps> = ({
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const clearCameraPhoto = () => {
+    setCameraPhoto((previous) => {
+      if (previous) URL.revokeObjectURL(previous.previewUrl);
+      return null;
+    });
+  };
+
+  const prepareCameraPhoto = async (photo: MediaResult) => {
+    const file = await prescriptionCameraFile(photo);
+    if (activeReportId) onClearReport();
+    clearCameraPhoto();
+    handleRemoveFile();
+    setCameraPhoto({ file, previewUrl: URL.createObjectURL(file) });
+    setAttachmentError(null);
+  };
+
+  const takePrescriptionPhoto = async () => {
+    if (cameraBusy || cameraUploading) return;
+    setCameraBusy(true);
+    setAttachmentError(null);
+    try {
+      const photo = await Camera.takePhoto({
+        quality: 88, targetWidth: 2200, targetHeight: 3000,
+        correctOrientation: true, saveToGallery: false,
+      });
+      await prepareCameraPhoto(photo);
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      if (code !== 'OS-PLUG-CAMR-0006') {
+        setAttachmentError(code === 'OS-PLUG-CAMR-0003'
+          ? (lang === 'hi' ? 'कैमरा उपलब्ध नहीं है। फोन की कैमरा अनुमति जाँचें।' : 'Camera is unavailable. Check camera access on your phone.')
+          : (lang === 'hi' ? 'फोटो नहीं ली जा सकी। फिर कोशिश करें।' : 'Could not take a photo. Please try again.'));
+      }
+    } finally {
+      setCameraBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    let remove = () => undefined;
+    void CapacitorApp.addListener('appRestoredResult', (result) => {
+      if (active && result.pluginId === 'Camera' && result.methodName === 'takePhoto' && result.data) {
+        void prepareCameraPhoto(result.data as MediaResult).catch(() => {
+          setAttachmentError(lang === 'hi' ? 'फोटो वापस नहीं खोली जा सकी। फिर फोटो लें।' : 'Could not restore the photo. Please retake it.');
+        });
+      }
+    }).then((handle) => { remove = () => { void handle.remove(); }; });
+    return () => { active = false; remove(); };
+  }, [lang]);
+
+  const confirmCameraUpload = async () => {
+    if (!cameraPhoto || cameraUploading || isProcessing) return;
+    setCameraUploading(true);
+    try {
+      await onSendMessage(`[Prescription Attachment: ${cameraPhoto.file.name}]`, cameraPhoto.file);
+      clearCameraPhoto();
+    } finally {
+      setCameraUploading(false);
+    }
+  };
+
   const handleSendText = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() && !selectedFile) return;
     const textToSend = inputText.trim() || (selectedFile ? `[Prescription Attachment: ${selectedFile.name}]` : '');
-    onSendMessage(textToSend, selectedFile || undefined);
+    if (activeReportId && !selectedFile) onReportQuestion(textToSend);
+    else onSendMessage(textToSend, selectedFile || undefined);
     setInputText('');
     setSpeechTranscript('');
     setVoiceState('idle');
@@ -401,6 +590,12 @@ export const VdaTab: React.FC<VdaTabProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button type="button" onClick={toggleAutoVoice} aria-pressed={autoVoiceEnabled}
+            className="flex items-center gap-1 rounded-xl border border-slate-700 px-2.5 py-1.5 text-xs text-slate-200"
+            title={autoVoiceEnabled ? 'Turn automatic voice off' : 'Turn automatic voice on'}>
+            {autoVoiceEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            <span>{autoVoiceEnabled ? 'Auto voice on' : 'Auto voice off'}</span>
+          </button>
           {/* Emergency Quick Dial Trigger */}
           <button
             onClick={() => setShowEmergencyDial(!showEmergencyDial)}
@@ -430,6 +625,10 @@ export const VdaTab: React.FC<VdaTabProps> = ({
         ref={chatScrollRef}
         className="flex-1 overflow-y-auto px-3.5 sm:px-4 py-3.5 space-y-3.5 scroll-smooth min-h-0"
       >
+        {activeReportId && <div className="flex items-center gap-2 rounded-xl bg-amber-950/50 p-3 text-xs text-amber-100" role="status">
+          <span className="flex-1">{lang === 'hi' ? 'चुनी हुई रिपोर्ट के बारे में पूछें।' : 'Ask about the selected report.'}</span>
+          <button type="button" onClick={onClearReport} className="min-h-10 rounded-lg border border-amber-500/50 px-3 font-bold">{lang === 'hi' ? 'बंद करें' : 'Done'}</button>
+        </div>}
         {/* Only prescription-confirmed, device-local medicine reminders appear here. */}
         {activeMedicineReminders.length > 0 && (
           <section className="rounded-2xl border border-emerald-500/30 bg-emerald-950/30 p-3 shadow-sm" aria-label="Medicine reminders">
@@ -655,6 +854,13 @@ export const VdaTab: React.FC<VdaTabProps> = ({
         })}
 
         {/* Backend-mediated audio capture status. No transcript is fabricated. */}
+        {networkState !== 'online' && (
+          <div className="p-3 rounded-2xl bg-amber-950/70 border border-amber-500/40 text-amber-100 text-xs" role="status">
+            {networkState === 'offline'
+              ? (lang === 'hi' ? 'इंटरनेट कनेक्शन नहीं है। कनेक्शन आने पर अपना प्रश्न फिर भेजें।' : 'You are offline. Send your question again when connected.')
+              : (lang === 'hi' ? 'कनेक्शन वापस आ गया है। ज़रूरत हो तो अपना प्रश्न फिर भेजें।' : 'Connection restored. Retry your question if needed.')}
+          </div>
+        )}
         {voiceState === 'recording' && (
           <div className="p-3 rounded-2xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-200 text-xs animate-pulse flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
@@ -669,7 +875,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
         {voiceState === 'transcribing' && (
           <div className="p-3 rounded-2xl bg-slate-900 border border-emerald-500/40 text-emerald-100 text-xs flex items-center gap-2" role="status">
             <LoaderCircle className="h-4 w-4 animate-spin text-emerald-400" />
-            <span className="font-semibold">{lang === 'hi' ? 'आवाज़ समझी जा रही है…' : 'Transcribing your voice…'}</span>
+            <span className="font-semibold">{lang === 'hi' ? 'आवाज़ भेजी और समझी जा रही है…' : 'Sending and transcribing your voice…'}</span>
           </div>
         )}
 
@@ -691,6 +897,13 @@ export const VdaTab: React.FC<VdaTabProps> = ({
           <div className="p-3 rounded-2xl bg-red-950/60 border border-red-500/40 text-red-100 text-xs" role="status">{voiceError}</div>
         )}
 
+        {speechPreparing && (
+          <div className="p-3 rounded-2xl bg-slate-900 border border-emerald-500/40 text-emerald-100 text-xs flex items-center gap-2" role="status">
+            <LoaderCircle className="h-4 w-4 animate-spin text-emerald-400" />
+            <span className="font-semibold">{lang === 'hi' ? 'आवाज़ में जवाब तैयार हो रहा है…' : 'Preparing spoken answer…'}</span>
+          </div>
+        )}
+
         {isProcessing && (
           <div className="flex max-w-[85%] items-center gap-2 rounded-2xl rounded-bl-none border border-emerald-500/30 bg-slate-900 px-3.5 py-3 text-xs text-emerald-100 shadow-sm" role="status" aria-live="polite">
             <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-emerald-400" />
@@ -702,8 +915,30 @@ export const VdaTab: React.FC<VdaTabProps> = ({
         )}
       </div>
 
+      {cameraPhoto && (
+        <div className="absolute inset-0 z-50 bg-slate-950/95 p-4 flex flex-col gap-4" role="dialog" aria-modal="true" aria-label={lang === 'hi' ? 'पर्ची की फोटो देखें' : 'Review prescription photo'}>
+          <h2 className="text-lg font-bold text-white">{lang === 'hi' ? 'पर्ची की फोटो देखें' : 'Review prescription photo'}</h2>
+          <p className="text-sm text-slate-300">{lang === 'hi' ? 'लिखावट साफ़ और पूरी दिख रही है? पुष्टि करने पर ही फोटो भेजी जाएगी।' : 'Is the whole prescription clear and readable? The photo is sent only after you confirm.'}</p>
+          <img src={cameraPhoto.previewUrl} alt={lang === 'hi' ? 'खींची हुई पर्ची' : 'Captured prescription'} className="min-h-0 flex-1 w-full object-contain rounded-2xl bg-slate-900" />
+          {cameraUploading && <p role="status" className="text-sm text-emerald-200 flex items-center gap-2"><LoaderCircle className="h-4 w-4 animate-spin" />{lang === 'hi' ? 'पर्ची अपलोड हो रही है…' : 'Uploading prescription…'}</p>}
+          <div className="grid grid-cols-2 gap-3">
+            <button type="button" disabled={cameraUploading} onClick={takePrescriptionPhoto} className="min-h-12 rounded-xl border border-emerald-500 text-emerald-100 font-bold disabled:opacity-50">{lang === 'hi' ? 'फिर फोटो लें' : 'Retake'}</button>
+            <button type="button" disabled={cameraUploading} onClick={() => clearCameraPhoto()} className="min-h-12 rounded-xl border border-slate-600 text-slate-200 font-bold disabled:opacity-50">{lang === 'hi' ? 'रद्द करें' : 'Cancel'}</button>
+          </div>
+          <button type="button" disabled={cameraUploading || isProcessing} onClick={() => void confirmCameraUpload()} className="min-h-14 rounded-xl bg-emerald-500 text-slate-950 font-bold text-base disabled:opacity-50">{lang === 'hi' ? 'पुष्टि करें और अपलोड करें' : 'Confirm & Upload'}</button>
+        </div>
+      )}
+
       {/* Persistent Bottom Voice & Input Deck */}
       <div className="flex-shrink-0 bg-slate-950/95 border-t border-slate-800/80 px-3 py-2.5 space-y-2 backdrop-blur-md z-20 shadow-lg">
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => void takePrescriptionPhoto()} disabled={isProcessing || voiceInteractionBusy || cameraBusy} className="min-h-12 rounded-xl bg-emerald-700 text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50">
+            <CameraIcon className="h-5 w-5" />{cameraBusy ? (lang === 'hi' ? 'कैमरा खुल रहा है…' : 'Opening camera…') : (lang === 'hi' ? 'फोटो खींचें' : 'Take Photo')}
+          </button>
+          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isProcessing || voiceInteractionBusy} className="min-h-12 rounded-xl border border-emerald-500/70 text-emerald-100 text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50">
+            <Upload className="h-5 w-5" />{lang === 'hi' ? 'पर्ची अपलोड करें' : 'Upload Prescription'}
+          </button>
+        </div>
         {/* Suggestion Chips */}
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none no-scrollbar">
           <button

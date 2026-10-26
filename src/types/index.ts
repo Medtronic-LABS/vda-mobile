@@ -236,6 +236,8 @@ export type AgentDomain =
 
 export interface ChatMessage {
   id: string;
+  /** Local provenance used to remove report questions and answers after deletion. */
+  reportId?: string;
   sender: 'user' | 'vda' | 'clinician' | 'system';
   agent?: AgentDomain;
   text: string;

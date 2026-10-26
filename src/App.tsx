@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import { Preferences } from '@capacitor/preferences';
-import { Sparkles, Pill, Building2, User } from 'lucide-react';
+import { Sparkles, Pill, Building2, User, FileText } from 'lucide-react';
 import { ChatMessage, ClinicalReviewFacility, Facility, FhirCondition, FhirDocument, FhirMedication, FhirObservation, HealthScheme, LanguageCode, PatientDemographics, UserProfile, userProfileToDemographics } from './types';
 import { getTranslation, playChime } from './utils/i18n';
 import { apiService, VdaApiError, type PatientPrescriptionCurrentState, type PatientPrescriptionLatestSubmission } from './services/api';
 import { pendingPrescriptionChatContent } from './services/prescription-extraction-chat';
 import { authService } from './services/auth.service';
+import { voicePerformance } from './services/voice-performance';
+import { pushNotificationService } from './services/push-notification.service';
 
 // Tab & Modal Components
 import { VdaTab } from './components/VdaTab';
+import { MedicalReportsPanel } from './components/MedicalReportsPanel';
 import { RemindersTab } from './components/RemindersTab';
 import { PatientFacilitiesTab } from './components/PatientFacilitiesTab';
 import { ProfileTab } from './components/ProfileTab';
@@ -86,15 +89,21 @@ export default function App() {
   // Authentication & User State
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [authRestoreUnavailable, setAuthRestoreUnavailable] = useState(false);
+  const [sessionPersisted, setSessionPersisted] = useState(true);
 
   const [lang, setLang] = useState<LanguageCode>('hi');
-  const [activeTab, setActiveTab] = useState<'vda' | 'reminders' | 'facilities' | 'profile'>('vda');
+  const [activeTab, setActiveTab] = useState<'vda' | 'reports' | 'reminders' | 'facilities' | 'profile'>('vda');
+  const [activeReportId, setActiveReportId] = useState<string | null>(null);
 
   // Backend VDA Session State
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [medicineReminderSnapshot, setMedicineReminderSnapshot] = useState<MedicineReminderSnapshot>(emptyMedicineReminderSnapshot);
   const [prescriptionReminderDraft, setPrescriptionReminderDraft] = useState<PrescriptionReminderDraft | null>(null);
   const [latestPrescriptionSubmission, setLatestPrescriptionSubmission] = useState<PatientPrescriptionLatestSubmission | null>(null);
+  const [prescriptionStatusNotice, setPrescriptionStatusNotice] = useState<string | null>(null);
+  const pendingPushRef = React.useRef<{ prescriptionId: string; eventId: string; tapped: boolean } | null>(null);
+  const pushHandlerRef = React.useRef<((notice: { prescriptionId: string; eventId: string }, tapped: boolean) => void) | null>(null);
   const [isMedicineRemindersOpen, setIsMedicineRemindersOpen] = useState(false);
   const [reminderSetup, setReminderSetup] = useState<ReminderSetup | null>(null);
   const [activeReminderStepId, setActiveReminderStepId] = useState<string | null>(null);
@@ -112,6 +121,8 @@ export default function App() {
   const activeUserIdRef = React.useRef<string | null>(null);
   const accountGenerationRef = React.useRef(0);
   const activeSessionIdRef = React.useRef<string | null>(null);
+  const pendingTurnRetryRef = React.useRef<{ userId: string; sessionId: string; text: string; reportId?: string; key: string } | null>(null);
+  const deletedReportIdsRef = React.useRef(new Set<string>());
   const sessionRecoveryRef = React.useRef<{ userId: string; failedSessionId: string; promise: Promise<string> } | null>(null);
   const [prescriptionContextSyncError, setPrescriptionContextSyncError] = useState<string | null>(null);
   const [emergencyFallback, setEmergencyFallback] = useState<{ nearbyFacilities: ClinicalReviewFacility[]; messageId: string } | null>(null);
@@ -136,11 +147,20 @@ export default function App() {
   // AuthService is the sole persisted-auth owner; this subscription owns the
   // active in-memory account and resets all account-scoped UI state.
   React.useEffect(() => {
-    void authService.init().finally(() => setAuthReady(true));
-    return authService.subscribe((u) => {
+    let active = true;
+    void authService.init().then(
+      () => { if (active) { setAuthRestoreUnavailable(false); setAuthReady(true); } },
+      () => { if (active) { setAuthRestoreUnavailable(true); setAuthReady(true); } },
+    );
+    const unsubscribe = authService.subscribe((u) => {
+      if (u?.id && u.id === activeUserIdRef.current) {
+        setCurrentUser(u);
+        return;
+      }
       accountGenerationRef.current += 1;
       activeUserIdRef.current = u?.id || null;
       activeSessionIdRef.current = null;
+      pendingTurnRetryRef.current = null;
       sessionInitRef.current = null;
       sessionRecoveryRef.current = null;
       prescriptionRefreshInFlightRef.current = null;
@@ -151,9 +171,19 @@ export default function App() {
       activeVerifiedPrescriptionDraftRef.current = null;
       directoryLoadKeyRef.current = null;
       setActiveSessionId(null);
+      setActiveReportId(null);
+      setActiveTab('vda');
+      setIsLogVitalOpen(false);
+      setConditions([]);
+      setMedications([]);
+      setObservations([]);
+      setDocuments([]);
+      setConsents([]);
       setMedicineReminderSnapshot(emptyMedicineReminderSnapshot);
       setPrescriptionReminderDraft(null);
       setLatestPrescriptionSubmission(null);
+      setPrescriptionStatusNotice(null);
+      pendingPushRef.current = null;
       setReminderSetup(null);
       activeReminderStepRef.current = null;
       reminderActionInFlightRef.current.clear();
@@ -168,8 +198,10 @@ export default function App() {
       setDirectoryStatus('idle');
       setDirectoryError(null);
       setCurrentUser(u);
+      setSessionPersisted(authService.isSessionPersisted());
       if (u?.language) setLang(u.language);
     });
+    return () => { active = false; unsubscribe(); };
   }, []);
 
   const loadPatientDirectories = React.useCallback(async (force = false) => {
@@ -259,7 +291,14 @@ export default function App() {
       if (active && patientId === currentUser.id) {
         void medicineReminderService.snapshot(patientId).then(setMedicineReminderSnapshot);
       }
-    }).then((nextDispose) => { dispose = nextDispose; });
+    }).then(async (nextDispose) => {
+      dispose = nextDispose;
+      const snapshot = await medicineReminderService.reconcileNotifications(currentUser.id);
+      if (active && activeUserIdRef.current === currentUser.id) setMedicineReminderSnapshot(snapshot);
+    }).catch(() => {
+      // The reminder UI must show that delivery is unverified on this device.
+      if (active) setMedicineReminderSnapshot((previous) => ({ ...previous, notificationPermission: 'unknown' }));
+    });
     return () => { active = false; dispose(); };
   }, [currentUser?.id]);
 
@@ -311,6 +350,13 @@ export default function App() {
     setIsProcessingMessage(false);
     setPatient(currentUser ? userProfileToDemographics(currentUser) : defaultDemographics);
   }, [currentUser?.id]);
+
+  React.useEffect(() => {
+    if (!currentUser) return;
+    setPatient(userProfileToDemographics(currentUser));
+    directoryLoadKeyRef.current = null;
+    void loadPatientDirectories(true);
+  }, [currentUser?.id, currentUser?.district, currentUser?.state]);
 
   const activateReminderStep = (stepId: string) => {
     activeReminderStepRef.current = stepId;
@@ -476,6 +522,34 @@ export default function App() {
       const promise = (async () => {
         const state = await apiService.getCurrentPrescriptionState(targetSessionId);
         if (activeUserIdRef.current !== userId || accountGenerationRef.current !== generation) return;
+        const submission = state.latestSubmission;
+        const statusKey = `vda-prescription-status:${userId}`;
+        const noticeKey = `vda-prescription-notice:${userId}`;
+        const savedStatus = await Preferences.get({ key: statusKey });
+        if (activeUserIdRef.current !== userId || accountGenerationRef.current !== generation) return;
+        if (submission) {
+          const cursor = `${submission.id}:${submission.verificationStatus}:${submission.updatedAt || ''}`;
+          if (savedStatus.value !== cursor) {
+            const reviewed = submission.verificationStatus === 'VERIFIED';
+            const rejected = submission.verificationStatus === 'REJECTED';
+            const clarify = submission.verificationStatus === 'NEEDS_RESUBMISSION';
+            if (reviewed || rejected || clarify) {
+              const notice = lang === 'hi'
+                ? reviewed ? 'आपकी पर्ची की जाँच हो गई है। दवाइयाँ देखें और रिमाइंडर सेट करें।'
+                  : rejected ? 'आपकी पर्ची मंज़ूर नहीं हुई। कृपया दवाइयाँ टैब में स्थिति देखें।'
+                    : 'आपकी पर्ची के लिए साफ़ फोटो चाहिए। कृपया दवाइयाँ टैब देखें।'
+                : reviewed ? 'Your prescription has been reviewed. Check your medicines and set reminders.'
+                  : rejected ? 'Your prescription was not approved. Check the Medicines tab.'
+                    : 'A clearer prescription is needed. Check the Medicines tab.';
+              await Preferences.set({ key: noticeKey, value: notice });
+              if (activeUserIdRef.current === userId && accountGenerationRef.current === generation) setPrescriptionStatusNotice(notice);
+            }
+            await Preferences.set({ key: statusKey, value: cursor });
+          } else {
+            const savedNotice = await Preferences.get({ key: noticeKey });
+            if (activeUserIdRef.current === userId && accountGenerationRef.current === generation) setPrescriptionStatusNotice(savedNotice.value);
+          }
+        }
         setLatestPrescriptionSubmission(state.latestSubmission);
         const activeVerified = state.activePlan;
         if (activeVerified) {
@@ -522,7 +596,42 @@ export default function App() {
       setIsMedicineRemindersOpen(true);
     }
     return refreshedState;
-  }, [activeSessionId, currentUser?.id, syncPrescriptionSessionContext]);
+  }, [activeSessionId, currentUser?.id, lang, syncPrescriptionSessionContext]);
+
+  React.useEffect(() => {
+    void pushNotificationService.initialize((notice, tapped) => pushHandlerRef.current?.(notice, tapped));
+  }, []);
+
+  const handlePushNotice = React.useCallback(async (notice: { prescriptionId: string; eventId: string }, tapped: boolean) => {
+    if (!currentUser || !activeSessionId) {
+      pendingPushRef.current = { ...notice, tapped };
+      return;
+    }
+    const ownerId = currentUser.id;
+    try {
+      // Push data is only a navigation hint. The authenticated, tenant-scoped
+      // prescription endpoint decides whether this account may open it.
+      const state = await apiService.getCurrentPrescriptionState(activeSessionId);
+      if (activeUserIdRef.current !== ownerId) return;
+      if (state.latestSubmission?.id !== notice.prescriptionId && state.activePlan?.id !== notice.prescriptionId) return;
+      await refreshVerifiedPrescription(false);
+      if (tapped) setActiveTab('reminders');
+    } catch {
+      if (tapped) pendingPushRef.current = { ...notice, tapped };
+    }
+  }, [currentUser?.id, activeSessionId, refreshVerifiedPrescription]);
+
+  React.useEffect(() => { pushHandlerRef.current = handlePushNotice; }, [handlePushNotice]);
+
+  React.useEffect(() => {
+    if (!currentUser || !activeSessionId) return;
+    void pushNotificationService.register(currentUser.id);
+    const pending = pendingPushRef.current;
+    if (pending) {
+      pendingPushRef.current = null;
+      void handlePushNotice(pending, pending.tapped);
+    }
+  }, [currentUser?.id, activeSessionId, handlePushNotice]);
 
   const recoverConversationSession = React.useCallback(async (failedSessionId: string): Promise<string> => {
     const user = authService.getUser();
@@ -589,7 +698,7 @@ export default function App() {
   const processSafeTextTurn = React.useCallback(async (
     text: string,
     sessionId: string,
-    options: { prescriptionContextRequired?: boolean; disableLocalFallback?: boolean; idempotencyKey: string },
+    options: { prescriptionContextRequired?: boolean; disableLocalFallback?: boolean; reportId?: string; idempotencyKey: string },
     userId: string,
     generation: number,
   ) => {
@@ -636,8 +745,28 @@ export default function App() {
       }
     };
     document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshVerifiedPrescription(false).catch(() => undefined);
+    }, 60_000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.clearInterval(interval);
+    };
   }, [activeSessionId, currentUser?.id, refreshVerifiedPrescription]);
+
+  React.useEffect(() => {
+    if (!currentUser) return;
+    let wasHidden = document.visibilityState === 'hidden';
+    const onVisible = () => {
+      if (document.visibilityState === 'hidden') { wasHidden = true; return; }
+      if (wasHidden) {
+        wasHidden = false;
+        void authService.refreshProfile().catch(() => undefined);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [currentUser?.id]);
 
   const openMedicineReminderConfiguration = React.useCallback(() => {
     const activePrescription = medicineReminderSnapshot.activePrescription;
@@ -788,11 +917,12 @@ export default function App() {
   };
 
   // Process user message with optional prescription document attachment
-  const handleSendMessage = async (userText: string, attachmentFile?: File, submittedReminderStepId?: string) => {
+  const handleSendMessage = async (userText: string, attachmentFile?: File, submittedReminderStepId?: string, reportIdForTurn?: string) => {
     if (isProcessingMessage) return;
     const submissionUserId = activeUserIdRef.current;
     const submissionGeneration = accountGenerationRef.current;
     if (!submissionUserId) return;
+    let attemptedTurnKey: string | null = null;
     playChime('start');
     setIsProcessingMessage(true);
     // Emergency presentation is strictly per turn. A new message always starts
@@ -812,6 +942,7 @@ export default function App() {
 
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
+      reportId: reportIdForTurn,
       sender: 'user',
       text: userText,
       textHi: userText,
@@ -826,7 +957,7 @@ export default function App() {
     // Voice and typed replies use the same patient-led reminder conversation.
     const reminderStepIdAtSubmission = submittedReminderStepId || activeReminderStepRef.current;
     const hasLocalReminderWorkflow = Boolean(reminderSetup || reminderStepIdAtSubmission);
-    const reminderResponse = !attachmentFile
+    const reminderResponse = !attachmentFile && !reportIdForTurn
       ? await handleReminderSetupResponse(userText)
       : { handled: false, answered: false };
     if (reminderResponse.handled) {
@@ -836,7 +967,7 @@ export default function App() {
       setIsProcessingMessage(false);
       return;
     }
-    if (!attachmentFile && hasLocalReminderWorkflow) {
+    if (!attachmentFile && !reportIdForTurn && hasLocalReminderWorkflow) {
       // An active device-local workflow is never allowed to fall through into a
       // normal VDA turn, even if its persisted UI state was interrupted.
       appendConversationMessage('रिमाइंडर की जानकारी अभी पूरी नहीं हुई है। कृपया दिए गए समय या विकल्प के अनुसार जवाब दें।');
@@ -979,26 +1110,43 @@ export default function App() {
       const localSnapshot = await medicineReminderService.snapshot(submissionUserId);
       if (activeUserIdRef.current !== submissionUserId || accountGenerationRef.current !== submissionGeneration) return;
       setMedicineReminderSnapshot(localSnapshot);
+      if (!reportIdForTurn) {
+        const adherenceAnswer = await medicineReminderService.answerAdherenceQuestion(submissionUserId, userText, lang);
+        if (activeUserIdRef.current !== submissionUserId || accountGenerationRef.current !== submissionGeneration) return;
+        if (adherenceAnswer) {
+          appendConversationMessage(adherenceAnswer);
+          return;
+        }
+      }
       const medicineRoute = classifyPrescriptionMedicineQuery(userText, localSnapshot);
-      const isPrescriptionContextQuestion = !attachmentFile && (
+      const isPrescriptionContextQuestion = !attachmentFile && !reportIdForTurn && (
         medicineRoute.route !== 'NONE' || followsLocalPrescriptionAnswer
       );
       // The backend owns all prescription-context reasoning. The device only
       // refreshes its confirmed reminder times and blocks any FHIR/mock fallback.
       // SafetyGate remains the backend's first decision for unsafe questions.
       if (!currentSessionId) throw new Error('VDA_SESSION_UNAVAILABLE');
-      const idempotencyKey = `turn-${crypto.randomUUID()}`;
+      const pendingRetry = pendingTurnRetryRef.current;
+      const idempotencyKey = pendingRetry?.userId === submissionUserId
+        && pendingRetry.sessionId === currentSessionId && pendingRetry.text === userText
+        && pendingRetry.reportId === reportIdForTurn
+        ? pendingRetry.key : `turn-${crypto.randomUUID()}`;
+      attemptedTurnKey = idempotencyKey;
       const result = await processSafeTextTurn(
         userText,
         currentSessionId,
-        isPrescriptionContextQuestion
+        reportIdForTurn
+          ? { reportId: reportIdForTurn, disableLocalFallback: true, idempotencyKey }
+          : isPrescriptionContextQuestion
           ? { disableLocalFallback: true, prescriptionContextRequired: true, idempotencyKey }
           : { idempotencyKey },
         submissionUserId,
         submissionGeneration,
       );
+      if (pendingTurnRetryRef.current?.key === idempotencyKey) pendingTurnRetryRef.current = null;
       if (activeUserIdRef.current !== submissionUserId || accountGenerationRef.current !== submissionGeneration) return;
-      if (result.responseType !== 'clinical-review') setMessages((prev) => [...prev, result.message]);
+      if (reportIdForTurn && deletedReportIdsRef.current.has(reportIdForTurn)) return;
+      if (result.responseType !== 'clinical-review') setMessages((prev) => [...prev, { ...result.message, reportId: reportIdForTurn }]);
       if (result.escalationDetected) {
         setEmergencyFallback({
           messageId: userMsg.id,
@@ -1007,16 +1155,33 @@ export default function App() {
       }
     } catch (error) {
       if (activeUserIdRef.current !== submissionUserId || accountGenerationRef.current !== submissionGeneration) return;
+      if (reportIdForTurn && deletedReportIdsRef.current.has(reportIdForTurn)) return;
+      voicePerformance.failed('turn');
       if (error instanceof VdaApiError && error.status === 401) {
         await authService.invalidateAuthentication();
         return;
       }
+      if (attemptedTurnKey && currentSessionId && error instanceof VdaApiError
+        && ['REQUEST_TIMEOUT', 'NETWORK_UNAVAILABLE', 'TURN_IN_PROGRESS'].includes(error.code || '')) {
+        pendingTurnRetryRef.current = { userId: submissionUserId, sessionId: currentSessionId, text: userText, reportId: reportIdForTurn, key: attemptedTurnKey };
+      } else if (attemptedTurnKey) {
+        pendingTurnRetryRef.current = null;
+      }
       setMessages((prev) => [...prev, {
         id: `backend-unavailable-${Date.now()}`,
+        reportId: reportIdForTurn,
         sender: 'vda',
         agent: 'router',
-        text: 'VDA service is unavailable. Please try again.',
-        textHi: 'VDA सेवा अभी उपलब्ध नहीं है। कृपया फिर प्रयास करें।',
+        text: error instanceof VdaApiError && error.code === 'REQUEST_TIMEOUT'
+          ? 'The connection timed out. Please retry your question.'
+          : error instanceof VdaApiError && error.code === 'NETWORK_UNAVAILABLE'
+            ? 'The connection was lost. Please retry when connected.'
+            : 'VDA service is unavailable. Please try again.',
+        textHi: error instanceof VdaApiError && error.code === 'REQUEST_TIMEOUT'
+          ? 'कनेक्शन का समय समाप्त हो गया। कृपया अपना सवाल फिर पूछें।'
+          : error instanceof VdaApiError && error.code === 'NETWORK_UNAVAILABLE'
+            ? 'कनेक्शन टूट गया। इंटरनेट आने पर अपना सवाल फिर पूछें।'
+            : 'VDA सेवा अभी उपलब्ध नहीं है। कृपया फिर प्रयास करें।',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       }]);
     } finally {
@@ -1029,6 +1194,20 @@ export default function App() {
   // Trigger manual or test escalation
   // The test control now sends the same input through the backend SafetyGate.
   const handleTriggerEscalation = (reason: string) => { void handleSendMessage(reason); };
+
+  const askAboutReport = (reportId: string) => {
+    setActiveReportId(reportId);
+    setActiveTab('vda');
+    void handleSendMessage(
+      lang === 'hi' ? 'इस चुनी हुई रिपोर्ट में क्या लिखा है? आसान भाषा में समझाएँ।'
+        : 'What is written in this selected report? Please explain simply.',
+      undefined, undefined, reportId,
+    );
+  };
+
+  const askReportFollowUp = (text: string) => {
+    if (activeReportId) void handleSendMessage(text, undefined, undefined, activeReportId);
+  };
 
   const handleReminderQuickAction = async (stepId: string, action: string) => {
     if (activeReminderStepRef.current !== stepId || reminderStepStates[stepId] !== 'ACTIVE') return;
@@ -1143,6 +1322,29 @@ export default function App() {
     );
   }
 
+  if (authRestoreUnavailable && !currentUser) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-slate-950 px-6 text-slate-100">
+        <div className="max-w-sm text-center space-y-4">
+          <Sparkles className="mx-auto h-8 w-8 text-emerald-400" />
+          <p className="text-lg font-bold">अभी आपका सुरक्षित लॉग इन जाँच नहीं पा रहे हैं</p>
+          <p className="text-sm text-slate-300">इंटरनेट चालू करें और फिर कोशिश करें। आपकी सहेजी हुई जानकारी सुरक्षित है।</p>
+          <button
+            type="button"
+            className="rounded-xl bg-emerald-500 px-5 py-3 font-bold text-slate-950"
+            onClick={() => {
+              setAuthReady(false);
+              void authService.init().then(
+                () => { setAuthRestoreUnavailable(false); setAuthReady(true); },
+                () => { setAuthRestoreUnavailable(true); setAuthReady(true); },
+              );
+            }}
+          >फिर कोशिश करें</button>
+        </div>
+      </div>
+    );
+  }
+
   if (!currentUser) {
     return (
       <AuthScreen
@@ -1160,6 +1362,20 @@ export default function App() {
     <div className="h-[100dvh] max-h-[100dvh] w-full bg-slate-950 text-slate-100 flex justify-center selection:bg-emerald-500 selection:text-white overflow-hidden">
       {/* Responsive Full-Screen Mobile App Container (Up to max-w-xl on larger screens) */}
       <div className="w-full max-w-xl h-full max-h-full bg-slate-950 flex flex-col relative border-x border-slate-800/80 shadow-2xl overflow-hidden">
+        {!sessionPersisted && (
+          <div className="bg-amber-950 px-3 py-2 text-center text-xs text-amber-100">
+            इस फोन पर लॉग इन सुरक्षित रूप से सेव नहीं हो पाया। ऐप बंद करने पर दोबारा साइन इन करना पड़ सकता है।
+          </div>
+        )}
+        {prescriptionStatusNotice && (
+          <div role="status" className="bg-emerald-900 px-3 py-2 text-sm text-white flex items-center gap-2">
+            <span className="flex-1">{prescriptionStatusNotice}</span>
+            <button type="button" className="underline" onClick={() => {
+              setPrescriptionStatusNotice(null);
+              if (currentUser) void Preferences.remove({ key: `vda-prescription-notice:${currentUser.id}` });
+            }}>{lang === 'hi' ? 'ठीक है' : 'Dismiss'}</button>
+          </div>
+        )}
         
         {/* Log Vital Metric Modal */}
         <LogVitalModal
@@ -1195,6 +1411,9 @@ export default function App() {
               emergencyFallback={emergencyFallback}
               isProcessing={isProcessingMessage}
               onSendMessage={handleSendMessage}
+              activeReportId={activeReportId}
+              onReportQuestion={askReportFollowUp}
+              onClearReport={() => setActiveReportId(null)}
               activeReminderStepId={activeReminderStepId}
               reminderStepStates={reminderStepStates}
               onReminderQuickAction={handleReminderQuickAction}
@@ -1206,6 +1425,21 @@ export default function App() {
               onSnoozeMedicineReminder={snoozeMedicineReminder}
               onOpenEmergencyTeleconsultation={openEmergencyEsanjeevani}
               onDismissEmergency={dismissEmergencyFallback}
+            />
+          )}
+
+          {activeTab === 'reports' && (
+            <MedicalReportsPanel
+              sessionId={activeSessionId}
+              lang={lang}
+              onClose={() => setActiveTab('vda')}
+              onAskReport={askAboutReport}
+              onDeleteReport={(reportId) => {
+                deletedReportIdsRef.current.add(reportId);
+                if (pendingTurnRetryRef.current?.reportId === reportId) pendingTurnRetryRef.current = null;
+                setMessages((prev) => prev.filter((message) => message.reportId !== reportId));
+                if (activeReportId === reportId) setActiveReportId(null);
+              }}
             />
           )}
 
@@ -1279,6 +1513,15 @@ export default function App() {
               <Sparkles className="w-5 h-5" />
             </div>
             <span className="text-[11px] leading-tight">{getTranslation(lang, 'tabVda')}</span>
+          </button>
+
+          <button
+            id="nav-tab-reports"
+            onClick={() => { playChime('start'); setActiveTab('reports'); }}
+            className={`flex-1 min-h-14 py-1.5 flex flex-col items-center gap-0.5 rounded-xl transition-all ${activeTab === 'reports' ? 'text-emerald-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            <div className={`p-1.5 rounded-xl ${activeTab === 'reports' ? 'bg-emerald-500/20' : ''}`}><FileText className="w-5 h-5" /></div>
+            <span className="text-[11px] leading-tight">{lang === 'hi' ? 'मेरी रिपोर्ट' : 'Reports'}</span>
           </button>
 
           <button

@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import React from 'react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const preferenceValues = new Map<string, string>();
 
@@ -22,7 +24,8 @@ vi.mock('@capacitor/local-notifications', () => ({
   },
 }));
 
-import { MedicineReminderService, PrescriptionReminderDraft, prescriptionToReminderDraft } from '../medicine-reminder.service';
+import { MedicineReminderService, PrescriptionReminderDraft, classifyAdherenceQuestion, classifyPrescriptionMedicineQuery, prescriptionToReminderDraft } from '../medicine-reminder.service';
+import { RemindersTab } from '../../components/RemindersTab';
 
 const verifiedDraft = (patientId: string, prescriptionId: string, revision: number): PrescriptionReminderDraft => {
   const draft = prescriptionToReminderDraft(patientId, {
@@ -48,6 +51,42 @@ const activate = async (service: MedicineReminderService, draft: PrescriptionRem
 
 describe('local-only medication adherence', () => {
   beforeEach(() => preferenceValues.clear());
+  afterEach(() => vi.useRealTimers());
+
+  it.each([
+    ['Aaj ki kaunsi medicine pending hai?', 'PENDING'],
+    ['Kal ki missed medicines dikhao.', 'MISSED'],
+    ['Meri medicine lene ki streak kitni hai?', 'STREAK'],
+    ['Maine galti se medicine taken mark kar di.', 'CORRECTION'],
+  ] as const)('recognizes %s as %s rather than a prescription list', (question, kind) => {
+    expect(classifyAdherenceQuestion(question)).toBe(kind);
+  });
+
+  it.each([
+    'Aaj ki pending medicine kya abhi le lu?',
+    'Should I take a missed dose now?',
+    'Can I double my pending medicine?',
+  ])('does not answer a clinical dose decision locally: %s', (question) => {
+    expect(classifyAdherenceQuestion(question)).toBeNull();
+  });
+
+  it('sends a named medicine timing question to verified prescription context', async () => {
+    const service = new MedicineReminderService();
+    const snapshot = await service.snapshot('patient-a');
+    expect(classifyPrescriptionMedicineQuery('Mujhe Metformin kab leni hai?', snapshot).route).toBe('PRESCRIPTION_FACT');
+  });
+
+  it('answers from the current patient device record and never another account', async () => {
+    const service = new MedicineReminderService();
+    const draft = verifiedDraft('patient-a', '77777777-7777-7777-7777-777777777777', 1);
+    const current = await activate(service, draft);
+    const question = 'Aaj ki kaunsi medicine pending hai?';
+    expect(await service.answerAdherenceQuestion('patient-a', question, 'hi')).toContain('Medicine 1');
+    expect(await service.answerAdherenceQuestion('patient-b', question, 'hi')).not.toContain('Medicine 1');
+    await service.recordAdherenceFromApp('patient-a', current.reminders[0].id, '08:00', 'TAKEN');
+    expect(await service.answerAdherenceQuestion('patient-a', question, 'hi')).toContain('सभी पुष्ट रिमाइंडर');
+    expect(await service.answerAdherenceQuestion('patient-a', 'Meri medicine lene ki streak kitni hai?', 'hi')).toContain('1 दिन');
+  });
 
   it('keeps one explicit outcome per deterministic occurrence and counts only TAKEN', async () => {
     const service = new MedicineReminderService();
@@ -138,5 +177,64 @@ describe('local-only medication adherence', () => {
     expect(after.reminders.every((reminder) => reminder.active)).toBe(true);
     expect(JSON.stringify(after.reminders)).not.toContain('Unverified B');
     expect((await service.snapshot('patient-b')).reminders).toEqual([]);
+  });
+
+  it('keeps India-day pending and missed answers stable and separates recorded outcomes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-18T03:30:00Z')); // 09:00 India time
+    const service = new MedicineReminderService();
+    const draft = verifiedDraft('patient-a', '88888888-8888-8888-8888-888888888888', 1);
+    const activated = await activate(service, draft);
+    const reminder = activated.reminders[0];
+    await service.recordAdherenceFromApp('patient-a', reminder.id, '08:00', 'TAKEN');
+
+    vi.setSystemTime(new Date('2026-10-18T19:00:00Z')); // 00:30 on 19 October in India
+    const question = 'Aaj ki kaunsi medicine pending hai?';
+    const first = await service.answerAdherenceQuestion('patient-a', question, 'hi');
+    expect(first).toContain('आगे के रिमाइंडर: Medicine 1 — 08:00');
+    expect(await service.answerAdherenceQuestion('patient-a', question, 'hi')).toBe(first);
+    expect(await service.answerAdherenceQuestion('patient-a', 'Kal ki missed medicines dikhao.', 'hi'))
+      .toContain('सभी पुष्ट रिमाइंडर');
+    expect(await service.answerAdherenceQuestion('patient-a', 'Meri medicine lene ki streak kitni hai?', 'hi'))
+      .toContain('1 दिन');
+
+    vi.setSystemTime(new Date('2026-10-19T04:00:00Z')); // 09:30 India time
+    expect(await service.answerAdherenceQuestion('patient-a', question, 'hi'))
+      .toContain('समय बीत गया, लेने का रिकॉर्ड नहीं');
+    await service.recordAdherenceFromApp('patient-a', reminder.id, '08:00', 'SKIPPED');
+    expect(await service.answerAdherenceQuestion('patient-a', question, 'hi'))
+      .toContain('“छोड़ दी” दर्ज');
+    await service.recordAdherenceFromApp('patient-a', reminder.id, '08:00', 'NOT_TAKEN');
+    expect(await service.answerAdherenceQuestion('patient-a', question, 'hi'))
+      .toContain('“नहीं ली” दर्ज');
+  });
+
+  it('corrects an accidentally marked dose through the real Medicines tab control and local store', async () => {
+    const service = new MedicineReminderService();
+    const draft = verifiedDraft('patient-a', '99999999-9999-9999-9999-999999999999', 1);
+    const initial = await activate(service, draft);
+    const reminder = initial.reminders[0];
+    let snapshot = await service.recordAdherenceFromApp('patient-a', reminder.id, '08:00', 'TAKEN');
+    const onRecordAdherence = async (id: string, time: string, action: any) => {
+      snapshot = await service.recordAdherenceFromApp('patient-a', id, time, action);
+      view.rerender(element());
+    };
+    const element = () => React.createElement(RemindersTab, {
+      lang: 'hi', snapshot, prescriptionState: null, contextSyncError: null,
+      onRecordAdherence, onSnooze: async () => undefined, onDeleteReminder: async () => undefined,
+      onEnableNotifications: async () => undefined, onOpenUploadPrescription: () => undefined,
+      onResubmitPrescription: () => undefined, onClearAllReminders: async () => undefined,
+    });
+    const view = render(element());
+    expect(await service.answerAdherenceQuestion('patient-a', 'Maine galti se medicine taken mark kar di.', 'hi'))
+      .toContain('“नहीं ली” चुनें');
+    expect(await service.answerAdherenceQuestion('patient-a', 'Kal galti se medicine taken mark kar di.', 'hi'))
+      .toContain('कल का रिकॉर्ड दवाइयाँ टैब से अभी नहीं बदल सकता');
+    fireEvent.click(screen.getByRole('button', { name: 'नहीं ली' }));
+    await waitFor(() => expect(snapshot.todayOutcomeByKey[`${reminder.id}:08:00`]).toBe('NOT_TAKEN'));
+    expect(snapshot.progress.takenToday).toBe(0);
+    expect((await service.snapshot('patient-a')).todayOutcomeByKey[`${reminder.id}:08:00`]).toBe('NOT_TAKEN');
+    const events = JSON.parse(preferenceValues.get('medicine-reminder-store-v1')!).patients['patient-a'].events;
+    expect(events.filter((event: any) => event.status !== 'SNOOZED')).toHaveLength(1);
   });
 });

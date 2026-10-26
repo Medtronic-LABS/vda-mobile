@@ -90,7 +90,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         if (cleanPhone.length !== 10) {
           throw new Error(lang === 'hi' ? 'कृपया 10-अंकीय मोबाइल नंबर दर्ज करें' : 'Please enter a valid 10-digit mobile number');
         }
-        if (!pin || pin.length < 4) {
+        if (pin.length !== 4) {
           throw new Error(lang === 'hi' ? 'कृपया अपना 4-अंकीय पिन दर्ज करें' : 'Please enter your 4-digit PIN');
         }
 
@@ -106,7 +106,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         if (!fullName.trim()) {
           throw new Error(lang === 'hi' ? 'कृपया अपना पूरा नाम दर्ज करें' : 'Please enter your full name');
         }
-        if (!pin || pin.length < 4) {
+        if (pin.length !== 4) {
           throw new Error(lang === 'hi' ? 'कम से कम 4 अंकों का पिन बनाएं' : 'PIN must be at least 4 digits');
         }
         const parsedAge = parseInt(age, 10);
@@ -412,7 +412,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               <input
                 type={showPin ? 'text' : 'password'}
                 required
-                maxLength={6}
+                maxLength={4}
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
                 placeholder={t.pinPlaceholder}

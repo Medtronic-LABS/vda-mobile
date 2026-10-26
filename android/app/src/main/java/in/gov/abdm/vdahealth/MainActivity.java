@@ -8,6 +8,7 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         // Register before BridgeActivity creates the Capacitor bridge.
         registerPlugin(EsanjeevaniLauncherPlugin.class);
+        registerPlugin(SecureTokenPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

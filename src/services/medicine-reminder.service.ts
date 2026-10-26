@@ -170,6 +170,13 @@ const localDateKey = (date = new Date()): string => {
   return formatter.format(date);
 };
 
+// Calendar arithmetic must use the same India day as reminders, even when the
+// browser or phone is running in another time zone.
+const previousLocalDateKey = (day: string, days = 1): string => {
+  const [year, month, date] = day.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, date - days)).toISOString().slice(0, 10);
+};
+
 const safeId = () => globalThis.crypto?.randomUUID?.() || `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 const occurrenceIdentity = (
@@ -253,6 +260,7 @@ const medicineEducationPattern = /(?:किस\s*(?:लिए|काम)|kis\s*(
 // Only explicit reminder questions enter the device reminder path. Medicine
 // timing, education, and safety questions continue through VDA agents.
 const reminderQueryPattern = /(?:reminder|रिमाइंडर)/i;
+const namedMedicineTimingPattern = /\b(?:kab\s+(?:leni|lena|loon|lu)\s+hai|when\s+(?:should\s+i\s+)?take)\b|कब\s*(?:लेनी|लेना|लूं|लूँ|लें)\s*है/i;
 const hasNamedPrescriptionMedicine = (query: string, prescription: LocalPrescription): boolean => {
   const normalized = query.toLowerCase();
   return prescription.medicines.some((medicine) => (
@@ -272,7 +280,7 @@ export const classifyPrescriptionMedicineQuery = (
   if (isUnsafeMedicineAction(query)) return { route: 'MEDICATION_SAFETY' };
   if (reminderQueryPattern.test(normalized)) return { route: 'REMINDER_QUERY' };
   if (medicineEducationPattern.test(normalized)) return { route: 'MEDICINE_EDUCATION' };
-  if (medicineQuestionPattern.test(query) || hasNamedMedicine) return { route: 'PRESCRIPTION_FACT' };
+  if (medicineQuestionPattern.test(query) || hasNamedMedicine || namedMedicineTimingPattern.test(query)) return { route: 'PRESCRIPTION_FACT' };
   return { route: 'NONE' };
 };
 
@@ -281,6 +289,20 @@ export const isPrescriptionMedicineFollowUp = (query: string): boolean => /(?:\b
 
 /** A routing guard only; the backend SafetyGate remains the authority for WITHHOLD decisions. */
 export const isUnsafeMedicineAction = (query: string): boolean => unsafeMedicineActionPattern.test(query);
+
+export const classifyAdherenceQuestion = (query: string): 'PENDING' | 'MISSED' | 'STREAK' | 'CORRECTION' | null => {
+  // Status is device-local, but a combined status + dosing decision must use
+  // the backend clinical safety route rather than this local answer.
+  if (isUnsafeMedicineAction(query)
+    || /(?:\b(?:should i|can i|what should i|kya main|abhi|now)\b.{0,40}\b(?:take|skip|double|le\s*lu|loon|lena)\b|(?:क्या\s*मैं|अभी|अब).{0,40}(?:ले\s*लूं|ले\s*लूँ|छोड़\s*दूं|दोगुनी))/i.test(query)) return null;
+  if (/\b(?:galti|galat|accidental(?:ly)?|mistake|wrong)\b.{0,45}\b(?:taken|mark|le\s*li|liya)\b|गलती.{0,45}(?:ले ली|मार्क|दर्ज)/i.test(query)) return 'CORRECTION';
+  if (/\b(?:streak|lagatar|continuous)\b|लगातार.{0,25}(?:दिन|दवा)|स्ट्रीक/i.test(query)) return 'STREAK';
+  const medicine = medicineQuestionPattern.test(query);
+  if (medicine && /\b(?:pending|remaining|left to take|baaki|baki)\b|बाकी|लंबित/i.test(query)) return 'PENDING';
+  if (medicine && /\b(?:missed|skip(?:ped)?|bhool|chhoot)\b|छूट|भूल/i.test(query)
+    && /\b(?:show|list|dikhao|kal|yesterday|which|kaunsi|konsi)\b|दिखाओ|कौनसी|कौन\s*सी|कल/i.test(query)) return 'MISSED';
+  return null;
+};
 
 export const prescriptionToReminderDraft = (patientId: string, prescription: PrescriptionUpload): PrescriptionReminderDraft => {
   const rawExtractionStatus = (prescription.extractionStatus || ((prescription.medications || []).length ? 'EXTRACTED' : 'REVIEW_REQUIRED')).toUpperCase();
@@ -597,24 +619,37 @@ export class MedicineReminderService {
     const today = localDateKey();
     const active = patient.reminders.filter((reminder) => reminder.active);
     const activeReminderIds = new Set(active.map((reminder) => reminder.id));
-    const scheduledToday = active.reduce((count, reminder) => count + reminder.times.length, 0);
-    const takenKeys = new Set(
-      patient.events
-        .filter((event) => event.status === 'TAKEN' && activeReminderIds.has(event.reminderId) && localDateKey(new Date(event.scheduledAt)) === today)
-        .map((event) => `${event.reminderId}:${event.scheduledAt.slice(11, 16)}`),
-    );
-    const takenToday = takenKeys.size;
+    const eligibleForDay = (day: string) => active.filter((reminder) =>
+      reminder.startDate <= day && (!reminder.endDate || reminder.endDate >= day));
+    const outcomesForDay = (day: string) => patient.events.reduce<Record<string, PatientAdherenceAction>>((outcomes, event) => {
+      if ((event.status === 'TAKEN' || event.status === 'SKIPPED' || event.status === 'NOT_TAKEN')
+        && activeReminderIds.has(event.reminderId)
+        && (event.scheduledDate || localDateKey(new Date(event.scheduledAt))) === day) {
+        outcomes[`${event.reminderId}:${event.scheduledTime || event.scheduledAt.slice(11, 16)}`] = event.status;
+      }
+      return outcomes;
+    }, {});
+    const todayReminders = eligibleForDay(today);
+    const scheduledToday = todayReminders.reduce((count, reminder) => count + reminder.times.length, 0);
+    const todayOutcomes = outcomesForDay(today);
+    const takenToday = todayReminders.reduce((count, reminder) => count + reminder.times.filter((time) =>
+      todayOutcomes[`${reminder.id}:${time}`] === 'TAKEN').length, 0);
     let currentStreakDays = 0;
-    for (let offset = 0; offset < 365; offset += 1) {
-      const day = new Date();
-      day.setDate(day.getDate() - offset);
-      const dayKey = localDateKey(day);
-      const eligible = active.filter((reminder) => reminder.startDate <= dayKey && (!reminder.endDate || reminder.endDate >= dayKey));
+    // An unfinished day does not erase a completed streak through yesterday.
+    // An explicit skipped/not-taken outcome does end today's streak.
+    const explicitlyNotTakenToday = todayReminders.some((reminder) => reminder.times.some((time) =>
+      todayOutcomes[`${reminder.id}:${time}`] === 'SKIPPED'
+      || todayOutcomes[`${reminder.id}:${time}`] === 'NOT_TAKEN'));
+    if (explicitlyNotTakenToday) return { scheduledToday, takenToday, currentStreakDays };
+    const firstOffset = scheduledToday > 0 && takenToday === scheduledToday ? 0 : 1;
+    for (let offset = firstOffset; offset < 365; offset += 1) {
+      const dayKey = previousLocalDateKey(today, offset);
+      const eligible = eligibleForDay(dayKey);
       if (!eligible.length) break;
       const total = eligible.reduce((count, reminder) => count + reminder.times.length, 0);
-      const completed = new Set(patient.events
-        .filter((event) => event.status === 'TAKEN' && activeReminderIds.has(event.reminderId) && localDateKey(new Date(event.scheduledAt)) === dayKey)
-        .map((event) => `${event.reminderId}:${event.scheduledAt.slice(11, 16)}`)).size;
+      const outcomes = offset === 0 ? todayOutcomes : outcomesForDay(dayKey);
+      const completed = eligible.reduce((count, reminder) => count + reminder.times.filter((time) =>
+        outcomes[`${reminder.id}:${time}`] === 'TAKEN').length, 0);
       if (completed < total) break;
       currentStreakDays += 1;
     }
@@ -653,6 +688,74 @@ export class MedicineReminderService {
       todayOutcomeByKey,
       activePrescription,
     };
+  }
+
+  async answerAdherenceQuestion(patientId: string, query: string, language: LanguageCode): Promise<string | null> {
+    const kind = classifyAdherenceQuestion(query);
+    if (!kind) return null;
+    const [, patient] = await this.patientStore(patientId);
+    const snapshot = await this.snapshot(patientId);
+    const hindi = language === 'hi' || /[\u0900-\u097f]|\b(?:meri|mera|maine|mujhe|kaunsi|dikhao|galti|kal)\b/i.test(query);
+    if (kind === 'CORRECTION') {
+      if (/\b(?:yesterday|kal)\b|कल/i.test(query)) return hindi
+        ? 'कल का रिकॉर्ड दवाइयाँ टैब से अभी नहीं बदल सकता। मैंने रिकॉर्ड नहीं बदला है।'
+        : 'The Medicines tab cannot correct yesterday’s record yet. I have not changed it.';
+      return hindi
+        ? 'आज की उसी दवा और समय के लिए दवाइयाँ टैब में “नहीं ली” चुनें। मैंने अभी रिकॉर्ड नहीं बदला है।'
+        : 'For today’s dose, select “Not taken” in Medicines for the same medicine and time. I have not changed the record.';
+    }
+    if (kind === 'STREAK') {
+      if (!snapshot.reminders.some((reminder) => reminder.active && reminder.confirmed)) return hindi
+        ? 'अभी कोई पुष्ट दवा रिमाइंडर नहीं है, इसलिए लेने की लगातार अवधि उपलब्ध नहीं है।'
+        : 'No confirmed medicine reminders are active, so an adherence streak is unavailable.';
+      return hindi
+        ? `आपकी दर्ज दवा लेने की लगातार अवधि ${snapshot.progress.currentStreakDays} दिन है।`
+        : `Your recorded medicine adherence streak is ${snapshot.progress.currentStreakDays} days.`;
+    }
+    const today = localDateKey();
+    const day = kind === 'MISSED' ? previousLocalDateKey(today) : today;
+    const active = snapshot.reminders.filter((reminder) => reminder.active && reminder.confirmed
+      && reminder.startDate <= day && (!reminder.endDate || reminder.endDate >= day));
+    const slots = active.flatMap((reminder) => reminder.times.map((time) => ({ reminder, time })));
+    if (!slots.length) return hindi
+      ? 'उस दिन के लिए कोई पुष्ट दवा रिमाइंडर दर्ज नहीं है।'
+      : 'No confirmed medicine reminders are recorded for that day.';
+    const outcomes = patient.events.reduce<Record<string, PatientAdherenceAction>>((found, event) => {
+      if ((event.status === 'TAKEN' || event.status === 'SKIPPED' || event.status === 'NOT_TAKEN')
+        && (event.scheduledDate || localDateKey(new Date(event.scheduledAt))) === day) {
+        found[`${event.reminderId}:${event.scheduledTime || event.scheduledAt.slice(11, 16)}`] = event.status;
+      }
+      return found;
+    }, {});
+    const groups: Record<'scheduled' | 'unrecorded' | 'notTaken' | 'skipped', string[]> = {
+      scheduled: [], unrecorded: [], notTaken: [], skipped: [],
+    };
+    const now = Date.now();
+    for (const { reminder, time } of slots) {
+      const status = outcomes[`${reminder.id}:${time}`];
+      if (status === 'TAKEN') continue;
+      const label = `${reminder.medicineName} — ${time}`;
+      if (status === 'SKIPPED') groups.skipped.push(label);
+      else if (status === 'NOT_TAKEN') groups.notTaken.push(label);
+      else if (kind === 'PENDING' && new Date(`${day}T${time}:00+05:30`).getTime() > now) groups.scheduled.push(label);
+      else groups.unrecorded.push(label);
+    }
+    if (Object.values(groups).every((items) => items.length === 0)) return hindi
+      ? 'उस दिन के सभी पुष्ट रिमाइंडर “ले ली” दर्ज हैं।'
+      : 'All confirmed reminders for that day are recorded as taken.';
+    const parts = hindi
+      ? [groups.scheduled.length && `आगे के रिमाइंडर: ${groups.scheduled.join(', ')}`,
+        groups.unrecorded.length && `समय बीत गया, लेने का रिकॉर्ड नहीं: ${groups.unrecorded.join(', ')}`,
+        groups.notTaken.length && `“नहीं ली” दर्ज: ${groups.notTaken.join(', ')}`,
+        groups.skipped.length && `“छोड़ दी” दर्ज: ${groups.skipped.join(', ')}`]
+      : [groups.scheduled.length && `Upcoming reminders: ${groups.scheduled.join(', ')}`,
+        groups.unrecorded.length && `Time passed, no taken record: ${groups.unrecorded.join(', ')}`,
+        groups.notTaken.length && `Marked not taken: ${groups.notTaken.join(', ')}`,
+        groups.skipped.length && `Marked skipped: ${groups.skipped.join(', ')}`];
+    return `${hindi ? (kind === 'MISSED' ? 'कल का रिकॉर्ड: ' : 'आज का रिकॉर्ड: ')
+      : (kind === 'MISSED' ? 'Yesterday’s record: ' : 'Today’s record: ')}${parts.filter(Boolean).join(hindi ? '। ' : '. ')}${hindi
+      ? '। रिकॉर्ड न होना पक्की छूटी खुराक नहीं है; दवाइयाँ टैब में जाँचें।'
+      : '. No record alone does not confirm a missed dose; check Medicines.'}`;
   }
 
   async initialize(onAction: (patientId: string) => void): Promise<() => void> {
@@ -701,7 +804,12 @@ export class MedicineReminderService {
       reminder.notificationIds = reminder.times.map((time) => notificationId(`${patientId}:${reminder.id}:${time}`));
     }
     const notifications = patient.reminders
-      .filter((reminder) => reminder.active)
+      .filter((reminder) => reminder.active && reminder.confirmed && patient.prescriptions.some((prescription) =>
+        prescription.id === reminder.prescriptionId &&
+        prescription.verificationStatus === 'VERIFIED' &&
+        prescription.activePlan &&
+        prescription.planRevision === reminder.planRevision,
+      ))
       .flatMap((reminder) => reminder.times.map((time, index) => {
         const [hour, minute] = time.split(':').map(Number);
         return {
@@ -711,11 +819,42 @@ export class MedicineReminderService {
           channelId: 'vda-medicine-reminders',
           actionTypeId: ACTION_TYPE_ID,
           extra: { patientId, reminderId: reminder.id, scheduledTime: time },
-          schedule: { on: { hour, minute }, repeats: true, allowWhileIdle: false },
+          schedule: { on: { hour, minute }, repeats: true, allowWhileIdle: true },
           isExactNotification: false,
         };
       }));
     if (notifications.length) await LocalNotifications.schedule({ notifications });
+  }
+
+  /** Keep another patient's scheduled reminders off a shared device after logout. */
+  async suspendNotifications(patientId: string): Promise<void> {
+    if (!Capacitor.isNativePlatform()) return;
+    const pending = await LocalNotifications.getPending();
+    const notifications = pending.notifications
+      .filter((item) => item.extra?.patientId === patientId)
+      .map((item) => ({ id: item.id }));
+    if (notifications.length) await LocalNotifications.cancel({ notifications });
+  }
+
+  /** Restore any missing alarms after login, reboot, or a device settings change. */
+  async reconcileNotifications(patientId: string): Promise<MedicineReminderSnapshot> {
+    const [store, patient] = await this.patientStore(patientId);
+    if (!Capacitor.isNativePlatform()) return this.snapshot(patientId);
+    const permission = await LocalNotifications.checkPermissions();
+    patient.notificationPermission = permission.display === 'granted' ? 'granted' : 'denied';
+    if (patient.notificationPermission === 'granted') {
+      const pending = await LocalNotifications.getPending();
+      const pendingIds = new Set(pending.notifications.map((item) => item.id));
+      const expectedIds = patient.reminders
+        .filter((reminder) => reminder.active && reminder.confirmed && patient.prescriptions.some((prescription) =>
+          prescription.id === reminder.prescriptionId && prescription.verificationStatus === 'VERIFIED' &&
+          prescription.activePlan && prescription.planRevision === reminder.planRevision,
+        ))
+        .flatMap((reminder) => reminder.times.map((time) => notificationId(`${patientId}:${reminder.id}:${time}`)));
+      if (expectedIds.some((id) => !pendingIds.has(id))) await this.syncNotifications(patientId, patient);
+    }
+    await this.writeStore(store);
+    return this.snapshot(patientId);
   }
 
   async confirmDraft(draft: PrescriptionReminderDraft): Promise<MedicineReminderSnapshot> {

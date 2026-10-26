@@ -58,6 +58,7 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
   const [showEditModal, setShowEditModal] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
 
   // Edit form state
   const [editName, setEditName] = useState(user.fullName);
@@ -107,9 +108,16 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
 
   const handleLogout = async () => {
     if (window.confirm('Are you sure you want to sign out?')) {
-      playChime('start');
-      await authService.logout();
-      onLogout();
+      setLogoutError(null);
+      try {
+        await authService.logout();
+        playChime('start');
+        onLogout();
+      } catch {
+        setLogoutError(lang === 'hi'
+          ? 'साइन आउट नहीं हो पाया। कृपया फिर कोशिश करें।'
+          : 'Could not sign out. Please try again.');
+      }
     }
   };
 
@@ -339,6 +347,7 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
           <LogOut className="w-4 h-4 text-red-400" />
           <span>{t.signOut}</span>
         </button>
+        {logoutError && <p role="alert" className="text-center text-xs text-red-300">{logoutError}</p>}
       </div>
 
       {/* EDIT PROFILE MODAL */}

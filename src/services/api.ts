@@ -30,9 +30,10 @@ import {
   UserProfile
 } from '../types';
 import type { VdaProcessResult } from '../utils/vdaEngine';
+import { voicePerformance } from './voice-performance';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
-const USE_MOCK_FALLBACK = import.meta.env.VITE_ENABLE_MOCK_FALLBACK !== 'false';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:3000' : '')).replace(/\/$/, '');
+const USE_MOCK_FALLBACK = import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOCK_FALLBACK === 'true';
 const ESANJEEVANI_OFFICIAL_URL = 'https://esanjeevani.mohfw.gov.in/#/patient/signin';
 const EsanjeevaniExternalLink = registerPlugin<{ open(): Promise<void> }>('EsanjeevaniLauncher');
 
@@ -55,6 +56,8 @@ export interface LoginDto {
 
 export interface AuthResponse {
   token: string;
+  refreshToken?: string;
+  refreshExpiresAt?: string;
   user: UserProfile;
   tokenType?: 'Bearer';
   expiresAt?: string;
@@ -64,6 +67,7 @@ export interface AuthResponse {
 /** Patient-visible extraction only; never an actionable prescription plan. */
 export interface PatientPrescriptionLatestSubmission {
   id: string;
+  updatedAt?: string;
   extractionStatus: string;
   verificationStatus: string;
   activePlan: boolean;
@@ -77,6 +81,23 @@ export interface PatientPrescriptionLatestSubmission {
 export interface PatientPrescriptionCurrentState {
   activePlan: any | null;
   latestSubmission: PatientPrescriptionLatestSubmission | null;
+}
+
+export interface PatientMedicalReport {
+  id: string;
+  filename: string;
+  mimeType: 'application/pdf' | 'image/jpeg' | 'image/png';
+  extractionStatus: 'EXTRACTED' | 'REVIEW_REQUIRED' | 'UNREADABLE';
+  explanation: string | null;
+  createdAt: string;
+  category: 'BLOOD_GLUCOSE' | 'HBA1C' | 'GLUCOSE_HBA1C' | null;
+  isCurrent: boolean;
+  replacementOf: string | null;
+  facts: {
+    reportName: string | null;
+    reportDate: string | null;
+    tests: Array<{ name: string; value: string; unit: string | null; referenceRange: string | null }>;
+  };
 }
 
 export class VdaApiError extends Error {
@@ -93,13 +114,126 @@ export class VdaApiError extends Error {
 
 class ApiService {
   private authToken: string | null = null;
+  private accountId: string | null = null;
+  private refreshHandler: (() => Promise<boolean>) | null = null;
+  private accessExpiresAt: number | null = null;
+
+  public setRefreshHandler(handler: () => Promise<boolean>): void { this.refreshHandler = handler; }
+  public setAccessExpiry(value?: string): void {
+    const time = value ? Date.parse(value) : NaN;
+    this.accessExpiresAt = Number.isFinite(time) ? time : null;
+  }
+
+  private timeoutMs(endpoint: string): number {
+    if (/\/turns(?:\?|$)/.test(endpoint)) return 120_000;
+    if (/\/voice\/tts$/.test(endpoint)) return 150_000;
+    if (/\/voice\/stt$/.test(endpoint)) return 45_000;
+    if (/\/reports(?:\/|\?|$)/.test(endpoint)) return 150_000;
+    if (/\/prescriptions(?:\?|$)/.test(endpoint)) return 90_000;
+    return 20_000;
+  }
+
+  private async fetchWithTimeout(
+    url: string,
+    options: RequestInit = {},
+    onTiming?: (phase: 'headers' | 'body', elapsedMs: number) => void,
+  ): Promise<Response> {
+    const originalHeaders = new Headers(options.headers);
+    const authorized = originalHeaders.has('Authorization');
+    const authEndpoint = /\/api\/v1\/auth\/(?:signup|login|refresh|logout)(?:\?|$)/.test(url);
+    const requestAccountId = this.accountId;
+    if (authorized && originalHeaders.get('Authorization') !== `Bearer ${this.authToken}`) {
+      throw new VdaApiError('Account changed. Please retry this action.', 0, 'AUTH_OPERATION_SUPERSEDED');
+    }
+    if (authorized && !authEndpoint && this.refreshHandler && this.accessExpiresAt && Date.now() >= this.accessExpiresAt - 60_000) {
+      await this.refreshHandler();
+    }
+    const headers = new Headers(options.headers);
+    if (authorized && requestAccountId && this.accountId !== requestAccountId) {
+      throw new VdaApiError('Account changed. Please retry this action.', 0, 'AUTH_OPERATION_SUPERSEDED');
+    }
+    if (authorized && this.authToken) headers.set('Authorization', `Bearer ${this.authToken}`);
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs(url));
+    const requestStartedAt = performance.now();
+    try {
+      const sentAuthorization = headers.get('Authorization');
+      let response = await fetch(url, { ...options, headers, signal: controller.signal });
+      if (response.status === 401 && authorized && !authEndpoint && this.refreshHandler) {
+        const renewed = this.authToken && sentAuthorization !== `Bearer ${this.authToken}`
+          ? true : await this.refreshHandler();
+        if (requestAccountId && this.accountId !== requestAccountId) {
+          throw new VdaApiError('Account changed. Please retry this action.', 0, 'AUTH_OPERATION_SUPERSEDED');
+        }
+        if (renewed && this.authToken) {
+          const method = (options.method || 'GET').toUpperCase();
+          const safeRetry = method === 'GET' || method === 'HEAD' || headers.has('Idempotency-Key');
+          if (!safeRetry) throw new VdaApiError('Sign-in renewed. Please retry this action.', 0, 'AUTH_RETRY_REQUIRED');
+          headers.set('Authorization', `Bearer ${this.authToken}`);
+          response = await fetch(url, { ...options, headers, signal: controller.signal });
+        }
+      }
+      onTiming?.('headers', Math.round(performance.now() - requestStartedAt));
+      // Keep the deadline active until the response body has arrived as well.
+      if (typeof response.arrayBuffer !== 'function') return response;
+      const body = await response.arrayBuffer();
+      onTiming?.('body', Math.round(performance.now() - requestStartedAt));
+      return new Response([204, 205, 304].includes(response.status) ? null : body,
+        { status: response.status, statusText: response.statusText, headers: response.headers });
+    } catch (error) {
+      if (controller.signal.aborted && !options.signal?.aborted) {
+        throw new VdaApiError('Connection timed out. Please retry.', 0, 'REQUEST_TIMEOUT',
+          'The connection timed out. Please retry.');
+      }
+      if (error instanceof TypeError) {
+        throw new VdaApiError('Connection unavailable. Please retry.', 0, 'NETWORK_UNAVAILABLE',
+          'The network is unavailable. Please retry when connected.');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener('abort', onAbort);
+    }
+  }
 
   public setAuthToken(token: string) {
     this.authToken = token;
   }
 
+  public setAccountId(id: string | null): void { this.accountId = id; }
+
   public clearAuthToken() {
     this.authToken = null;
+    this.accessExpiresAt = null;
+    this.accountId = null;
+  }
+
+  async refresh(refreshToken: string, nextRefreshToken: string): Promise<AuthResponse> {
+    const response = await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/auth/refresh`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken, nextRefreshToken }),
+    });
+    if (!response.ok) throw await this.apiError(response, 'Your session has expired. Please sign in again.');
+    return response.json();
+  }
+
+  async revokeRefreshSession(refreshToken: string): Promise<void> {
+    await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/auth/logout`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }),
+    });
+  }
+
+  async registerPushDevice(token: string): Promise<void> {
+    await this.request('/api/v1/mobile/push/devices', {
+      method: 'POST', headers: this.getHeaders(), body: JSON.stringify({ token }),
+    }, { registered: false });
+  }
+
+  async unregisterPushDevices(): Promise<void> {
+    await this.request('/api/v1/mobile/push/devices', {
+      method: 'DELETE', headers: this.getHeaders(),
+    }, undefined);
   }
 
   public isBackendConfigured(): boolean {
@@ -146,11 +280,12 @@ class ApiService {
    */
   private async request<T>(endpoint: string, options: RequestInit = {}, fallbackData: T): Promise<T> {
     if (!API_BASE_URL) {
-      return fallbackData;
+      if (USE_MOCK_FALLBACK) return fallbackData;
+      throw new VdaApiError('VDA service is unavailable.', 0, 'BACKEND_UNAVAILABLE');
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      const response = await this.fetchWithTimeout(`${API_BASE_URL}${endpoint}`, {
         ...options,
         headers: {
           ...this.getHeaders(),
@@ -185,7 +320,7 @@ class ApiService {
       throw new Error('API_BASE_URL_NOT_CONFIGURED');
     }
 
-    const response = await fetch(`${API_BASE_URL}/api/v1/auth/signup`, {
+    const response = await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/auth/signup`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -210,7 +345,7 @@ class ApiService {
       throw new Error('API_BASE_URL_NOT_CONFIGURED');
     }
 
-    const response = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
+    const response = await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -229,7 +364,7 @@ class ApiService {
 
   async getProfile(): Promise<UserProfile> {
     if (!API_BASE_URL || !this.authToken) throw new Error('AUTHENTICATION_REQUIRED');
-    const response = await fetch(`${API_BASE_URL}/api/v1/auth/profile`, { headers: this.getHeaders() });
+    const response = await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/auth/profile`, { headers: this.getHeaders() });
     if (!response.ok) throw await this.apiError(response, `Profile validation failed with status ${response.status}`);
     return response.json();
   }
@@ -242,7 +377,7 @@ class ApiService {
       throw new Error('API_BASE_URL_NOT_CONFIGURED');
     }
 
-    const response = await fetch(`${API_BASE_URL}/api/v1/auth/profile`, {
+    const response = await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/auth/profile`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(profile)
@@ -269,7 +404,7 @@ class ApiService {
     try {
       await this.initAuthToken();
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/sessions`, {
+      const response = await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/sessions`, {
         method: 'POST',
         headers: {
           ...this.getHeaders(),
@@ -304,7 +439,7 @@ class ApiService {
     attended: boolean,
   ): Promise<FollowUpAttendanceResponse> {
     await this.initAuthToken();
-    const response = await fetch(
+    const response = await this.fetchWithTimeout(
       `${API_BASE_URL}/api/v1/sessions/${encodeURIComponent(sessionId)}/follow-ups/${encodeURIComponent(followUpId)}/attendance`,
       { method: 'POST', headers: this.getHeaders(), body: JSON.stringify({ attended }) },
     );
@@ -327,6 +462,7 @@ class ApiService {
       disableLocalFallback?: boolean;
       prescriptionId?: string;
       prescriptionContextRequired?: boolean;
+      reportId?: string;
       idempotencyKey?: string;
     },
   ): Promise<VdaProcessResult> {
@@ -345,7 +481,8 @@ class ApiService {
         throw new Error('VDA_SESSION_UNAVAILABLE');
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/sessions/${activeSession}/turns`, {
+      const turnStartedAt = performance.now();
+      const response = await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/sessions/${activeSession}/turns`, {
         method: 'POST',
         headers: {
           ...this.getHeaders(),
@@ -357,6 +494,7 @@ class ApiService {
           language: lang,
           ...(options?.prescriptionId ? { prescription_id: options.prescriptionId } : {}),
           ...(options?.prescriptionContextRequired ? { prescription_context_required: true } : {}),
+          ...(options?.reportId ? { report_id: options.reportId } : {}),
         })
       });
 
@@ -365,6 +503,7 @@ class ApiService {
       }
 
       const turnResult = await response.json();
+      voicePerformance.timing('turn', { requestDurationMs: Math.round(performance.now() - turnStartedAt) });
       const content = turnResult.content || {};
       const sections: ChatMessage['sections'] = Array.isArray(content.sections)
         ? content.sections
@@ -477,7 +616,7 @@ class ApiService {
   ): Promise<void> {
     if (!API_BASE_URL) return;
     await this.initAuthToken();
-    const response = await fetch(
+    const response = await this.fetchWithTimeout(
       `${API_BASE_URL}/api/v1/sessions/${encodeURIComponent(sessionId)}/prescription-context`,
       {
         method: 'POST',
@@ -520,25 +659,47 @@ class ApiService {
     if (durationMs !== undefined) form.append('duration_ms', String(durationMs));
     const headers = this.getHeaders() as Record<string, string>;
     delete headers['Content-Type'];
-    const response = await fetch(`${API_BASE_URL}/api/v1/voice/stt`, {
+    const startedAt = performance.now();
+    const response = await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/voice/stt`, {
       method: 'POST',
       headers,
       body: form,
     });
+    voicePerformance.timing('stt', {
+      status: response.status, requestDurationMs: Math.round(performance.now() - startedAt),
+      mimeType, bytes: audio.size, recordingDurationMs: durationMs ?? null,
+    });
     if (!response.ok) throw new Error(`Voice STT error ${response.status}`);
-    return response.json();
+    const result = await response.json();
+    if (import.meta.env.DEV) console.debug('[VDA STT result]', {
+      provider: result.provider, fallbackUsed: result.fallbackUsed,
+      emptyTranscript: !String(result.transcript || '').trim(),
+    });
+    return result;
   }
 
   /** Requests Sarvam-generated playback for final patient-facing response text. */
   async synthesizeVoice(text: string, lang: LanguageCode): Promise<Blob> {
     await this.initAuthToken();
-    const response = await fetch(`${API_BASE_URL}/api/v1/voice/tts`, {
+    let headersMs = 0;
+    let bodyMs = 0;
+    const response = await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/voice/tts`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ text, language_code: this.voiceLanguageCode(lang) }),
+    }, (phase, elapsedMs) => {
+      if (phase === 'headers') headersMs = elapsedMs;
+      else bodyMs = elapsedMs;
     });
     if (!response.ok) throw new Error(`Voice TTS error ${response.status}`);
-    return response.blob();
+    const audio = await response.blob();
+    voicePerformance.timing('tts', {
+      requestToHeadersMs: headersMs,
+      audioDownloadMs: Math.max(0, bodyMs - headersMs),
+      totalResponseMs: bodyMs,
+      audioBytes: audio.size,
+    });
+    return audio;
   }
 
   private voiceLanguageCode(lang: LanguageCode): string {
@@ -606,7 +767,7 @@ class ApiService {
         headers['Authorization'] = `Bearer ${this.authToken}`;
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/sessions/${sessionId}/prescriptions`, {
+      const response = await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/sessions/${sessionId}/prescriptions`, {
         method: 'POST',
         headers,
         body: formData
@@ -623,6 +784,62 @@ class ApiService {
       console.warn('[VDA API] Prescription upload error:', err);
       throw err;
     }
+  }
+
+  /** Report uploads are a separate patient-scoped resource, never a prescription. */
+  async uploadMedicalReport(sessionId: string, file: File, language: LanguageCode): Promise<PatientMedicalReport> {
+    await this.initAuthToken();
+    const form = new FormData();
+    form.append('file', file);
+    form.append('report_consent', 'true');
+    form.append('language', language);
+    const headers = new Headers(this.getHeaders());
+    headers.delete('Content-Type');
+    const response = await this.fetchWithTimeout(
+      `${API_BASE_URL}/api/v1/sessions/${encodeURIComponent(sessionId)}/reports`,
+      { method: 'POST', headers, body: form },
+    );
+    if (!response.ok) throw await this.apiError(response, 'Report upload failed. Please try again.');
+    return response.json();
+  }
+
+  async listMedicalReports(sessionId: string): Promise<PatientMedicalReport[]> {
+    await this.initAuthToken();
+    const response = await this.fetchWithTimeout(
+      `${API_BASE_URL}/api/v1/sessions/${encodeURIComponent(sessionId)}/reports`,
+      { headers: this.getHeaders() },
+    );
+    if (!response.ok) throw await this.apiError(response, 'Reports could not be loaded.');
+    return response.json();
+  }
+
+  async getMedicalReportSource(sessionId: string, reportId: string): Promise<Blob> {
+    await this.initAuthToken();
+    const response = await this.fetchWithTimeout(
+      `${API_BASE_URL}/api/v1/sessions/${encodeURIComponent(sessionId)}/reports/${encodeURIComponent(reportId)}/source`,
+      { headers: this.getHeaders() },
+    );
+    if (!response.ok) throw await this.apiError(response, 'Report could not be opened.');
+    return response.blob();
+  }
+
+  async deleteMedicalReport(sessionId: string, reportId: string): Promise<void> {
+    await this.initAuthToken();
+    const response = await this.fetchWithTimeout(
+      `${API_BASE_URL}/api/v1/sessions/${encodeURIComponent(sessionId)}/reports/${encodeURIComponent(reportId)}`,
+      { method: 'DELETE', headers: this.getHeaders() },
+    );
+    if (!response.ok) throw await this.apiError(response, 'Report could not be deleted.');
+  }
+
+  async confirmMedicalReportReplacement(sessionId: string, reportId: string): Promise<PatientMedicalReport> {
+    await this.initAuthToken();
+    const response = await this.fetchWithTimeout(
+      `${API_BASE_URL}/api/v1/sessions/${encodeURIComponent(sessionId)}/reports/${encodeURIComponent(reportId)}/confirm-replacement`,
+      { method: 'POST', headers: this.getHeaders() },
+    );
+    if (!response.ok) throw await this.apiError(response, 'Report replacement could not be confirmed.');
+    return response.json();
   }
 
   /** Resolve the exact session's active verified plan and latest submission server-side. */
@@ -663,7 +880,7 @@ class ApiService {
   async getFacilities(): Promise<FacilityDirectoryResponse> {
     await this.initAuthToken();
     if (!this.authToken) throw new Error('AUTHENTICATION_REQUIRED');
-    const response = await fetch(`${API_BASE_URL}/api/v1/patient/facilities`, {
+    const response = await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/patient/facilities`, {
       headers: this.getHeaders(),
     });
     if (!response.ok) throw new Error(`Facility directory error ${response.status}`);
@@ -674,7 +891,7 @@ class ApiService {
   async getSchemes(): Promise<SchemeDirectoryResponse> {
     await this.initAuthToken();
     if (!this.authToken) throw new Error('AUTHENTICATION_REQUIRED');
-    const response = await fetch(`${API_BASE_URL}/api/v1/patient/schemes`, {
+    const response = await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/patient/schemes`, {
       headers: this.getHeaders(),
     });
     if (!response.ok) throw new Error(`Scheme directory error ${response.status}`);
