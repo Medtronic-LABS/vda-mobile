@@ -242,6 +242,9 @@ export interface ChatMessage {
   agent?: AgentDomain;
   text: string;
   textHi?: string;
+  /** Optional response written for speech; older messages fall back to visual text. */
+  spokenSummary?: string;
+  spokenSummaryLang?: LanguageCode;
   textTa?: string;
   textKn?: string;
   timestamp: string;

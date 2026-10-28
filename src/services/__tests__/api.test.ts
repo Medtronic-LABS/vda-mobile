@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { apiService, VdaApiError } from '../api';
 import { PatientDemographics } from '../../types';
+import { getChatMessageText } from '../../utils/vdaEngine';
 
 describe('VDA Mobile — ApiService', () => {
   const mockDemographics: PatientDemographics = {
@@ -179,6 +180,35 @@ describe('VDA Mobile — ApiService', () => {
   });
 
   describe('Conversation session error contract', () => {
+    it('keeps a Hindi-only answer in Hindi with an explicit English fallback after switching', async () => {
+      apiService.setAuthToken('synthetic-token');
+      vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true, status: 201,
+        json: async () => ({ turn_number: 1, response_type: 'text', selected_agent: 'scheme',
+          content: { summary: 'योजना की पात्रता पहले जाँचें।', hi: 'योजना की पात्रता पहले जाँचें।',
+            spoken_summary: 'योजना की पात्रता जाँच लें।', sections: [{ body: 'सरकारी सूची देखें।' }] } }),
+      } as Response);
+      const result = await apiService.processVdaQuery('Ayushman Bharat kya hai?', mockDemographics, [], [], 'hi', 'session-1');
+      expect(result.message.textHi).toBe('योजना की पात्रता पहले जाँचें।');
+      expect(result.message.text).toContain('English translation unavailable');
+      expect(result.message.spokenSummary).toBe('योजना की पात्रता जाँच लें।');
+      expect(result.message.spokenSummaryLang).toBe('hi');
+    });
+
+    it('switches between supplied localized summaries without another API request', async () => {
+      apiService.setAuthToken('synthetic-token');
+      const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true, status: 201,
+        json: async () => ({ turn_number: 2, response_type: 'text', selected_agent: 'report-reader',
+          content: { summary: 'रिपोर्ट में ग्लूकोज़ 245 mg/dL है।',
+            hi: 'रिपोर्ट में ग्लूकोज़ 245 mg/dL है।', en: 'The report shows glucose 245 mg/dL.' } }),
+      } as Response);
+      const result = await apiService.processVdaQuery('मेरी रिपोर्ट समझाएँ', mockDemographics, [], [], 'hi', 'session-1');
+      expect(getChatMessageText(result.message, 'hi')).toContain('245 mg/dL');
+      expect(getChatMessageText(result.message, 'en')).toBe('The report shows glucose 245 mg/dL.');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('preserves SESSION_EXPIRED and the caller idempotency key for recovery', async () => {
       apiService.setAuthToken('patient-token');
       const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({

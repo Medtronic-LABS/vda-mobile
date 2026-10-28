@@ -87,16 +87,22 @@ export interface PatientMedicalReport {
   id: string;
   filename: string;
   mimeType: 'application/pdf' | 'image/jpeg' | 'image/png';
-  extractionStatus: 'EXTRACTED' | 'REVIEW_REQUIRED' | 'UNREADABLE';
+  extractionStatus: 'EXTRACTED' | 'REVIEW_REQUIRED' | 'UNREADABLE' | 'EXTRACTION_FAILED';
+  readingCompleteness?: 'POSSIBLY_PARTIAL' | 'UNCONFIRMED' | 'NOT_VERIFIED';
   explanation: string | null;
   createdAt: string;
+  reportType: 'CBC' | 'THYROID' | 'KIDNEY' | 'LIVER' | 'LIPID' | 'URINE'
+    | 'BLOOD_GLUCOSE' | 'HBA1C' | 'GLUCOSE_HBA1C' | 'OTHER_LAB' | null;
   category: 'BLOOD_GLUCOSE' | 'HBA1C' | 'GLUCOSE_HBA1C' | null;
   isCurrent: boolean;
   replacementOf: string | null;
   facts: {
     reportName: string | null;
     reportDate: string | null;
-    tests: Array<{ name: string; value: string; unit: string | null; referenceRange: string | null }>;
+    verification?: 'INDEPENDENT_OCR_V1' | 'PDF_TEXT_LAYER_V1';
+    tests: Array<{ name: string; value: string; unit: string | null; referenceRange: string | null; flag?: string;
+      evidence?: string; source?: { page: number; confidence: number; rotationDegrees?: number;
+        bbox: { x0: number; y0: number; x1: number; y1: number } } }>;
   };
 }
 
@@ -530,13 +536,18 @@ class ApiService {
       const structuredSummary = typeof content.summary === 'string'
         ? content.summary.trim()
         : '';
-      const textEn = sections?.length
-        ? structuredSummary
-        : content.en || structuredSummary || content.patient_text || content.reason
-          || (typeof content === 'string' ? content : '');
-      const textHi = sections?.length
-        ? structuredSummary
-        : content.hi || content.patient_text || structuredSummary || content.reason || textEn;
+      const visualSummary = structuredSummary || content.patient_text || content.reason
+        || (typeof content === 'string' ? content : '');
+      const englishCandidate = typeof content.en === 'string' ? content.en.trim() : '';
+      const hindiCandidate = typeof content.hi === 'string' ? content.hi.trim() : '';
+      const localizedSummary = (candidate: string) => sections?.length && structuredSummary
+        && candidate.startsWith(structuredSummary) ? structuredSummary : candidate;
+      const englishText = localizedSummary(englishCandidate) || visualSummary;
+      const textEn = /[\u0900-\u097f]/u.test(englishText)
+        ? `English translation unavailable. Original answer:\n${englishText}` : englishText;
+      const hindiText = localizedSummary(hindiCandidate) || visualSummary || englishCandidate;
+      const textHi = !hindiCandidate && hindiText && !/[\u0900-\u097f]/u.test(hindiText)
+        ? `हिंदी अनुवाद उपलब्ध नहीं है। मूल उत्तर:\n${hindiText}` : hindiText;
       const mainText = lang === 'hi' && textHi ? textHi : (textEn || textHi);
 
       const isEscalated = turnResult.response_type === 'escalation'
@@ -576,8 +587,12 @@ class ApiService {
         id: `turn-msg-${turnResult.turn_number || Date.now()}`,
         sender: 'vda',
         agent: turnResult.selected_agent || 'router',
-        text: mainText,
+        text: textEn || textHi,
         textHi: textHi,
+        spokenSummary: typeof content.spoken_summary === 'string' && content.spoken_summary.trim()
+          ? content.spoken_summary.trim() : undefined,
+        spokenSummaryLang: typeof content.spoken_summary === 'string' && content.spoken_summary.trim()
+          ? lang : undefined,
         textTa: mainText,
         textKn: mainText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -678,7 +693,7 @@ class ApiService {
     return result;
   }
 
-  /** Requests Sarvam-generated playback for final patient-facing response text. */
+  /** Requests the configured TTS provider; Sarvam uses these voice settings when selected. */
   async synthesizeVoice(text: string, lang: LanguageCode): Promise<Blob> {
     await this.initAuthToken();
     let headersMs = 0;
@@ -686,7 +701,9 @@ class ApiService {
     const response = await this.fetchWithTimeout(`${API_BASE_URL}/api/v1/voice/tts`, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ text, language_code: this.voiceLanguageCode(lang) }),
+      body: JSON.stringify({ text, language_code: this.voiceLanguageCode(lang),
+        voice_id: ({ hi: 'priya', en: 'ishita', ta: 'ishita', kn: 'neha' } as const)[lang],
+        pace: 0.9 }),
     }, (phase, elapsedMs) => {
       if (phase === 'headers') headersMs = elapsedMs;
       else bodyMs = elapsedMs;

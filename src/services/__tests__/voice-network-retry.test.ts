@@ -29,3 +29,14 @@ it('keeps an uncertain turn retry on the same caller idempotency key', async () 
     expect(new Headers(call[1].headers).get('Idempotency-Key')).toBe('same-turn-key');
   }
 });
+
+it('requests an unhurried Hindi voice without changing the TTS endpoint', async () => {
+  apiService.setAuthToken('synthetic-test-token');
+  const fetchSpy = vi.fn().mockResolvedValue(new Response('synthetic audio', {
+    status: 200, headers: { 'Content-Type': 'audio/mpeg' },
+  }));
+  vi.stubGlobal('fetch', fetchSpy);
+  await apiService.synthesizeVoice('नमस्ते', 'hi');
+  const body = JSON.parse(fetchSpy.mock.calls[0][1].body as string);
+  expect(body).toEqual({ text: 'नमस्ते', language_code: 'hi-IN', voice_id: 'priya', pace: 0.9 });
+});

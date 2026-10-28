@@ -3,7 +3,7 @@ import { Mic, MicOff, Send, Volume2, VolumeX, Pill, Activity, Building2, Award, 
 import { Camera, type MediaResult } from '@capacitor/camera';
 import { App as CapacitorApp } from '@capacitor/app';
 import { prescriptionCameraFile } from '../services/prescription-camera.service';
-import { buildSpokenPlan } from '../services/voice-spoken-text';
+import { buildSpokenPlan, speechLanguageForText } from '../services/voice-spoken-text';
 import { voicePerformance } from '../services/voice-performance';
 import { microphoneConstraints, preferredRecordingMime } from '../services/voice-capture';
 import { waitForAudioPlayback } from '../services/voice-playback';
@@ -180,11 +180,12 @@ export const VdaTab: React.FC<VdaTabProps> = ({
       setSpeakingMsgId(audioId);
       for (const chunk of chunks) {
         setSpeechPreparing(true);
-        const audioBlob = await apiService.synthesizeVoice(chunk, lang);
+        const audioBlob = await apiService.synthesizeVoice(chunk, speechLanguageForText(chunk, lang));
         if (playbackGeneration !== playbackGenerationRef.current) return;
         const url = URL.createObjectURL(audioBlob);
         playbackUrlRef.current = url;
         const player = new Audio(url);
+        player.playbackRate = 0.96;
         playbackRef.current = player;
         const playback = waitForAudioPlayback(player, () => {
           if (playbackGeneration !== playbackGenerationRef.current) return;

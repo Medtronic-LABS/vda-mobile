@@ -895,6 +895,18 @@ export function playChime(type: 'start' | 'stop' | 'success' | 'alert') {
 // Text-to-Speech engine
 let currentUtterance: SpeechSynthesisUtterance | null = null;
 
+export function configureSpeechUtterance(utterance: SpeechSynthesisUtterance, lang: LanguageCode) {
+  const locale: Record<LanguageCode, string> = { hi: 'hi-IN', en: 'en-IN', ta: 'ta-IN', kn: 'kn-IN' };
+  utterance.lang = locale[lang];
+  utterance.rate = lang === 'hi' ? 0.88 : 0.9;
+  utterance.pitch = 1;
+  const voices = window.speechSynthesis.getVoices();
+  const matching = voices.filter((voice) => voice.lang.toLowerCase() === utterance.lang.toLowerCase());
+  const preferred = matching.find((voice) => /\b(?:female|woman|priya|suhani|ishita|neha|ritu|pooja|lekha|vani)\b/i.test(voice.name));
+  utterance.voice = preferred || matching[0]
+    || voices.find((voice) => voice.lang.toLowerCase().startsWith(lang)) || null;
+}
+
 export function speakText(text: string, lang: LanguageCode = 'hi', onEnd?: () => void) {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     if (onEnd) onEnd();
@@ -906,21 +918,7 @@ export function speakText(text: string, lang: LanguageCode = 'hi', onEnd?: () =>
   const utterance = new SpeechSynthesisUtterance(text);
   currentUtterance = utterance;
 
-  const langMap: Record<LanguageCode, string> = {
-    hi: 'hi-IN',
-    en: 'en-IN',
-    ta: 'ta-IN',
-    kn: 'kn-IN'
-  };
-  utterance.lang = langMap[lang] || 'hi-IN';
-  utterance.rate = 0.92;
-  utterance.pitch = 1.0;
-
-  const voices = window.speechSynthesis.getVoices();
-  const match = voices.find(v => v.lang.startsWith(utterance.lang.slice(0, 2)) || v.lang === utterance.lang);
-  if (match) {
-    utterance.voice = match;
-  }
+  configureSpeechUtterance(utterance, lang);
 
   utterance.onend = () => {
     currentUtterance = null;

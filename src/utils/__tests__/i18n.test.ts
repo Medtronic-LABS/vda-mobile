@@ -94,6 +94,18 @@ describe('VDA Mobile — i18n & Multilingual Parity', () => {
       speakText('नमस्ते', 'hi');
       expect(mockSynthesis.cancel).toHaveBeenCalled();
       expect(mockSynthesis.speak).toHaveBeenCalled();
+      const utterance = mockSynthesis.speak.mock.calls[0][0];
+      expect(utterance.lang).toBe('hi-IN');
+      expect(utterance.rate).toBe(0.88);
+    });
+
+    it('prefers a matching warm Hindi voice when the device offers one', () => {
+      mockSynthesis.getVoices.mockReturnValue([
+        { lang: 'hi-IN', name: 'Hindi Default' },
+        { lang: 'hi-IN', name: 'Priya' },
+      ]);
+      speakText('नमस्ते', 'hi');
+      expect(mockSynthesis.speak.mock.calls[0][0].voice.name).toBe('Priya');
     });
 
     it('should cancel speech when stopSpeaking is called', () => {

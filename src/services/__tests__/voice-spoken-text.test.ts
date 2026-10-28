@@ -1,12 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '../../types';
-import { buildSpokenPlan, splitSpokenText } from '../voice-spoken-text';
+import { buildSpokenPlan, speechLanguageForText, splitSpokenText } from '../voice-spoken-text';
 
 const message = (text: string, overrides: Partial<ChatMessage> = {}): ChatMessage => ({
   id: 'voice-test', sender: 'vda', text, timestamp: '12:00', ...overrides,
 });
 
 describe('spoken answer safety', () => {
+  it('uses the original answer language for speech after a language switch', () => {
+    expect(speechLanguageForText('English translation unavailable. Original answer: बीपी जाँच कराएँ।', 'en')).toBe('hi');
+    expect(speechLanguageForText('Check your blood pressure.', 'en')).toBe('en');
+  });
+  it('uses the dedicated speech text without visual section titles or repeated bullets', () => {
+    const reply = message('आयुष्मान भारत योजना पात्र लोगों की मदद करती है।', {
+      textHi: 'आयुष्मान भारत योजना पात्र लोगों की मदद करती है।',
+      spokenSummary: 'आयुष्मान भारत योजना की पात्रता पहले जाँच लें।', spokenSummaryLang: 'hi',
+      sections: [{ title: 'पात्रता', bullets: ['आयुष्मान भारत योजना पात्र लोगों की मदद करती है।'] }],
+    });
+    expect(buildSpokenPlan(reply, 'hi', false).chunks).toEqual(['आयुष्मान भारत योजना की पात्रता पहले जाँच लें।']);
+    expect(buildSpokenPlan(reply, 'en', false).chunks.join(' ')).not.toContain('पात्रता पहले जाँच लें');
+  });
+
+  it('keeps older section details while skipping duplicate visual headings', () => {
+    const reply = message('Check your eligibility.', {
+      sections: [{ title: 'Eligibility', body: 'Check your eligibility.', bullets: ['Ask at the help desk.'] }],
+    });
+    expect(buildSpokenPlan(reply, 'en', false).chunks.join(' ')).toBe('Check your eligibility. Ask at the help desk.');
+  });
   it('uses a concise automatic summary for a long non-clinical structured answer', () => {
     const reply = message('Here is a short overview.', {
       agent: 'scheme',

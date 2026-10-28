@@ -3,8 +3,8 @@ import { Camera, type MediaResult } from '@capacitor/camera';
 import { App as CapacitorApp } from '@capacitor/app';
 import { ArrowLeft, Camera as CameraIcon, FileText, Image as ImageIcon, LoaderCircle, Volume2, VolumeX } from 'lucide-react';
 import { apiService, VdaApiError, type PatientMedicalReport } from '../services/api';
-import { prescriptionCameraFile } from '../services/prescription-camera.service';
 import type { LanguageCode } from '../types';
+import { configureSpeechUtterance } from '../utils/i18n';
 
 interface Props {
   sessionId: string | null;
@@ -15,6 +15,50 @@ interface Props {
 }
 
 const allowed = new Set(['application/pdf', 'image/jpeg', 'image/png']);
+/** Keep small laboratory print legible while removing camera metadata. */
+async function reportCameraFile(photo: MediaResult): Promise<File> {
+  if (!photo.webPath) throw new Error('CAMERA_IMAGE_UNAVAILABLE');
+  const response = await fetch(photo.webPath);
+  if (!response.ok) throw new Error('CAMERA_IMAGE_UNAVAILABLE');
+  const bitmap = await createImageBitmap(await response.blob());
+  try {
+    const scale = Math.min(1, 3000 / bitmap.width, 4000 / bitmap.height);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('CAMERA_IMAGE_UNAVAILABLE');
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const encode = (quality: number) => new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('CAMERA_IMAGE_UNAVAILABLE')),
+        'image/jpeg', quality));
+    let image = await encode(0.94);
+    if (image.size > 9 * 1024 * 1024) image = await encode(0.86);
+    if (image.size > 10 * 1024 * 1024) {
+      const smaller = Math.min(1, 2200 / bitmap.width, 3000 / bitmap.height);
+      canvas.width = Math.max(1, Math.round(bitmap.width * smaller));
+      canvas.height = Math.max(1, Math.round(bitmap.height * smaller));
+      const reduced = canvas.getContext('2d');
+      if (!reduced) throw new Error('CAMERA_IMAGE_UNAVAILABLE');
+      reduced.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      image = await encode(0.88);
+    }
+    if (image.size > 10 * 1024 * 1024) throw new Error('CAMERA_IMAGE_TOO_LARGE');
+    return new File([image], `report-${Date.now()}.jpg`, { type: 'image/jpeg' });
+  } finally { bitmap.close(); }
+}
+const reportLabels: Record<NonNullable<PatientMedicalReport['reportType']>, [string, string]> = {
+  CBC: ['खून की पूरी जाँच', 'Complete blood count'],
+  THYROID: ['थायरॉयड जाँच', 'Thyroid report'],
+  KIDNEY: ['किडनी जाँच', 'Kidney report'],
+  LIVER: ['लिवर जाँच', 'Liver report'],
+  LIPID: ['खून में चर्बी की जाँच', 'Lipid report'],
+  URINE: ['पेशाब की जाँच', 'Urine report'],
+  BLOOD_GLUCOSE: ['ब्लड शुगर', 'Blood glucose'],
+  HBA1C: ['HbA1c', 'HbA1c'],
+  GLUCOSE_HBA1C: ['शुगर और HbA1c', 'Glucose and HbA1c'],
+  OTHER_LAB: ['जाँच रिपोर्ट', 'Lab report'],
+};
 
 export function MedicalReportsPanel({ sessionId, lang, onClose, onAskReport, onDeleteReport }: Props) {
   const hindi = lang === 'hi';
@@ -59,7 +103,7 @@ export function MedicalReportsPanel({ sessionId, lang, onClose, onAskReport, onD
   };
 
   const preparePhoto = async (photo: MediaResult) => {
-    const clean = await prescriptionCameraFile(photo);
+    const clean = await reportCameraFile(photo);
     chooseFile(new File([clean], `report-${Date.now()}.jpg`, { type: 'image/jpeg' }));
   };
 
@@ -117,7 +161,7 @@ export function MedicalReportsPanel({ sessionId, lang, onClose, onAskReport, onD
     setBusy('camera');
     setError('');
     try {
-      await preparePhoto(await Camera.takePhoto({ quality: 88, targetWidth: 2200, targetHeight: 3000,
+      await preparePhoto(await Camera.takePhoto({ quality: 95, targetWidth: 3000, targetHeight: 4000,
         correctOrientation: true, saveToGallery: false }));
     } catch (cause) {
       if ((cause as { code?: string })?.code !== 'OS-PLUG-CAMR-0006') {
@@ -191,6 +235,7 @@ export function MedicalReportsPanel({ sessionId, lang, onClose, onAskReport, onD
       const url = URL.createObjectURL(audio);
       audioUrlRef.current = url;
       const player = new Audio(url);
+      player.playbackRate = 0.96;
       audioRef.current = player;
       player.onended = stopSpeaking;
       player.onerror = stopSpeaking;
@@ -200,8 +245,7 @@ export function MedicalReportsPanel({ sessionId, lang, onClose, onAskReport, onD
       stopSpeaking();
       if ('speechSynthesis' in window && 'SpeechSynthesisUtterance' in window) {
         const utterance = new SpeechSynthesisUtterance(report.explanation);
-        utterance.lang = hindi ? 'hi-IN' : 'en-IN';
-        utterance.rate = 0.9;
+        configureSpeechUtterance(utterance, lang);
         utterance.onend = () => setSpeaking(false);
         utterance.onerror = () => {
           setSpeaking(false);
@@ -264,7 +308,9 @@ export function MedicalReportsPanel({ sessionId, lang, onClose, onAskReport, onD
         {loading && <p role="status" className="text-sm">{hindi ? 'रिपोर्ट खुल रही हैं…' : 'Loading reports…'}</p>}
         {!loading && !reports.length && <p className="text-sm text-slate-300">{hindi ? 'अभी कोई रिपोर्ट नहीं है।' : 'No reports yet.'}</p>}
         {reports.map((report) => <article key={report.id} className={`space-y-3 rounded-2xl border bg-slate-900 p-4 ${report.replacementOf ? 'border-amber-500' : 'border-slate-700'}`}>
-          <p className="text-sm font-bold text-emerald-200">{report.category === 'BLOOD_GLUCOSE' ? (hindi ? 'ब्लड शुगर' : 'Blood glucose') : report.category === 'HBA1C' ? 'HbA1c' : report.category === 'GLUCOSE_HBA1C' ? (hindi ? 'शुगर और HbA1c' : 'Glucose and HbA1c') : (hindi ? 'श्रेणी स्पष्ट नहीं' : 'Category not identified')}
+          <p className="text-sm font-bold text-emerald-200">{report.reportType || report.category
+            ? reportLabels[(report.reportType || report.category)!]?.[hindi ? 0 : 1]
+            : (hindi ? 'रिपोर्ट का प्रकार स्पष्ट नहीं' : 'Report type not identified')}
             {' · '}{report.replacementOf ? (hindi ? 'बदलने की पुष्टि बाकी' : 'Replacement pending') : report.isCurrent ? (hindi ? 'मौजूदा रिपोर्ट' : 'Current report') : (hindi ? 'पुरानी रिपोर्ट' : 'Earlier version')}</p>
           {report.replacementOf && <div className="space-y-2 rounded-xl bg-amber-950/40 p-3 text-sm">
             <p>{hindi ? `मौजूदा रिपोर्ट: ${reports.find((item) => item.id === report.replacementOf)?.filename || 'पुरानी रिपोर्ट'}` : `Current report: ${reports.find((item) => item.id === report.replacementOf)?.filename || 'Earlier report'}`}</p>
@@ -278,14 +324,20 @@ export function MedicalReportsPanel({ sessionId, lang, onClose, onAskReport, onD
             <FileText className="shrink-0 text-emerald-400" /><span className="break-all">{report.facts.reportName || report.filename}</span>
           </button>
           {expandedId === report.id && <div className="space-y-3 text-sm">
-            <p>{report.explanation}</p>
-            {report.extractionStatus !== 'EXTRACTED' && <p role="alert" className="rounded-lg border border-amber-500 p-2 text-amber-100">{hindi ? 'रिपोर्ट पूरी तरह साफ़ नहीं पढ़ी जा सकी। असली रिपोर्ट देखें।' : 'This report could not be read confidently. View the original.'}</p>}
+            {report.readingCompleteness === 'POSSIBLY_PARTIAL' && <p role="status" className="rounded-lg border border-amber-500 p-2 text-amber-100">
+              {hindi ? 'रिपोर्ट का कुछ हिस्सा पढ़ा गया है। कुछ नतीजे छूट सकते हैं; असली रिपोर्ट देखें।'
+                : 'Only part of this report may have been read. Some results could be missing; check the original.'}
+            </p>}
+            <p className="whitespace-pre-line leading-relaxed">{report.explanation}</p>
+            {report.extractionStatus !== 'EXTRACTED' && <p role="alert" className="rounded-lg border border-amber-500 p-2 text-amber-100">{report.extractionStatus === 'EXTRACTION_FAILED'
+              ? (hindi ? 'रिपोर्ट पढ़ने की सेवा अभी काम नहीं कर रही। बाद में फिर कोशिश करें।' : 'Report processing failed. Please try again later.')
+              : (hindi ? 'रिपोर्ट पूरी तरह साफ़ नहीं पढ़ी जा सकी। असली रिपोर्ट देखें।' : 'This report could not be read confidently. View the original.')}</p>}
             <p className="text-amber-100">{hindi
               ? 'ये शब्द कंप्यूटर ने रिपोर्ट से पढ़े हैं। असली रिपोर्ट से मिलान करें।'
               : 'These words were read by a computer. Check them against the original report.'}</p>
             {report.facts.reportDate && <p>{hindi ? 'रिपोर्ट की तारीख' : 'Report date'}: {report.facts.reportDate}</p>}
             {report.facts.tests.length > 0 && <div className="space-y-2">{report.facts.tests.map((test, index) =>
-              <p key={`${report.id}-${index}`} className="rounded-lg bg-slate-800 p-2">{test.name}: {test.value}{test.unit ? ` ${test.unit}` : ''}{test.referenceRange ? ` · ${hindi ? 'लिखी सीमा' : 'Printed range'}: ${test.referenceRange}` : ''}</p>)}</div>}
+              <p key={`${report.id}-${index}`} className="rounded-lg bg-slate-800 p-2">{test.name}: {test.value}{test.unit ? ` ${test.unit}` : ''}{test.referenceRange ? ` · ${hindi ? 'लिखी सीमा' : 'Printed range'}: ${test.referenceRange}` : ''}{test.flag ? ` · ${hindi ? 'लैब का निशान' : 'Lab flag'}: ${test.flag}` : ''}</p>)}</div>}
             <p className="font-medium text-amber-200">{hindi ? 'नतीजों के बारे में डॉक्टर से बात करें।' : 'Discuss the results with a clinician.'}</p>
             <div className="grid grid-cols-2 gap-2">
               <button type="button" onClick={() => onAskReport(report.id)} className="min-h-12 rounded-xl bg-emerald-500 px-2 font-bold text-slate-950">{hindi ? 'आसान भाषा में समझें' : 'Explain Simply'}</button>

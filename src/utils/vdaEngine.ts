@@ -19,14 +19,15 @@ export function getChatMessageText(msg: ChatMessage, lang: LanguageCode): string
         : msg.text;
 }
 
-/** Canonical summary + structured sections used only for read-aloud output. */
+/** Dedicated speech when supplied; older messages retain their useful section details. */
 export function getChatMessageSpeechText(msg: ChatMessage, lang: LanguageCode): string {
+  if (msg.spokenSummary?.trim() && (!msg.spokenSummaryLang || msg.spokenSummaryLang === lang)) return msg.spokenSummary.trim();
   const summary = getChatMessageText(msg, lang);
   const sectionText = msg.sections?.flatMap((section) => [
-    section.title,
+    !section.body && !section.bullets?.length ? section.title : undefined,
     section.body,
     ...(section.bullets || []),
-  ]).filter((value): value is string => Boolean(value?.trim())).join('\n');
+  ]).filter((value): value is string => Boolean(value?.trim()) && value.trim() !== summary.trim()).join('\n');
   return sectionText ? `${summary}\n\n${sectionText}` : summary;
 }
 

@@ -13,6 +13,14 @@ export interface SpokenPlan {
   summarized: boolean;
 }
 
+/** Speak an explicitly labeled original answer in its script after a language switch. */
+export function speechLanguageForText(text: string, selected: LanguageCode): LanguageCode {
+  if (/[\u0900-\u097F]/u.test(text)) return 'hi';
+  if (/[\u0B80-\u0BFF]/u.test(text)) return 'ta';
+  if (/[\u0C80-\u0CFF]/u.test(text)) return 'kn';
+  return selected;
+}
+
 /** Splits at sentence or word boundaries; no text is discarded. */
 export function splitSpokenText(value: string): string[] {
   const text = value.replace(/\s+/gu, ' ').trim();
