@@ -80,4 +80,12 @@ describe('spoken answer safety', () => {
     expect(buildSpokenPlan(reply, 'en', true).chunks).toEqual([]);
     expect(buildSpokenPlan(reply, 'en', false).chunks.join(' ')).toBe(reply.text.trim());
   });
+
+  it('strips bracketed bureaucratic glosses like (EHCP) and (AB PM-JAY) from spoken chunks', () => {
+    const reply = message('आयुष्मान भारत (AB PM-JAY) में अधिकृत अस्पतालों (EHCP) और पात्रता (Eligibility) देखें।');
+    const spoken = buildSpokenPlan(reply, 'hi', false).chunks.join(' ');
+    expect(spoken).not.toContain('(EHCP)');
+    expect(spoken).not.toContain('(AB PM-JAY)');
+    expect(spoken).not.toContain('(Eligibility)');
+  });
 });

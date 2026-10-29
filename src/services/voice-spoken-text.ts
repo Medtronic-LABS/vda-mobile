@@ -21,9 +21,19 @@ export function speechLanguageForText(text: string, selected: LanguageCode): Lan
   return selected;
 }
 
+/** Removes bureaucratic parenthetical glosses (e.g. "(EHCP)", "(AB PM-JAY)", "(Eligibility)") before TTS. */
+export function stripSpokenParentheticalGlosses(value: string): string {
+  return value
+    .replace(
+      /\s*\(\s*(?:EHCPs?|AB[\s-]*PM[\s-]*JAY|PM[\s-]*JAY|BIS|CSC|PMAMs?|SECC(?:\s*2011)?|Eligibility|Empanelled\s+Hospitals?)\s*\)/giu,
+      '',
+    )
+    .replace(/\s+([,.!?।॥;:])/gu, '$1');
+}
+
 /** Splits at sentence or word boundaries; no text is discarded. */
 export function splitSpokenText(value: string): string[] {
-  const text = value.replace(/\s+/gu, ' ').trim();
+  const text = stripSpokenParentheticalGlosses(value).replace(/\s+/gu, ' ').trim();
   const chunks: string[] = [];
   let remaining = text;
   while (remaining.length > MAX_TTS_CHARS) {
