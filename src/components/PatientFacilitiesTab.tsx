@@ -21,11 +21,23 @@ interface PatientFacilitiesTabProps {
   onRetry: () => void;
 }
 
+// Clinical rule: government facilities first, private last. Directory rows send
+// ownership GOVERNMENT/PRIVATE; database rows send PUBLIC/PRIVATE in facilityType.
+const ownershipRank = (facility: Facility) => {
+  const ownership = (facility.ownership ?? facility.facilityType)?.toUpperCase();
+  return ownership === 'GOVERNMENT' || ownership === 'PUBLIC' ? 0 : ownership === 'PRIVATE' ? 2 : 1;
+};
+
+const ownershipLabel = (facility: Facility, lang: LanguageCode) => {
+  const rank = ownershipRank(facility);
+  if (rank === 0) return lang === 'hi' ? 'सरकारी' : 'Government';
+  if (rank === 2) return lang === 'hi' ? 'निजी' : 'Private';
+  return facility.facilityType;
+};
+
 const copy = (lang: LanguageCode) => lang === 'hi' ? {
   title: 'अस्पताल व योजनाएँ', hospitals: 'अस्पताल', schemes: 'सरकारी योजनाएँ',
-  search: 'नाम से खोजें', area: 'आपके दर्ज क्षेत्र से मेल खाने वाली सुविधाएँ',
-  availability: 'जाने से पहले सेवा और वर्तमान उपलब्धता की पुष्टि सुविधा से करें।',
-  areaMatched: 'क्षेत्र के आधार पर मिला', pmjay: 'PM-JAY सूचीबद्ध', call: 'कॉल करें',
+  search: 'नाम से खोजें', pmjay: 'PM-JAY सूचीबद्ध', call: 'कॉल करें',
   emptyFacilities: 'आपके दर्ज क्षेत्र के लिए अभी कोई स्रोत-समर्थित सुविधा नहीं मिली।',
   emptySchemes: 'आपके राज्य के लिए अभी कोई स्रोत-समर्थित योजना उपलब्ध नहीं है।',
   eligibility: 'पात्रता के लिए आधिकारिक सत्यापन जरूरी है।', documents: 'जरूरी दस्तावेज',
@@ -33,9 +45,7 @@ const copy = (lang: LanguageCode) => lang === 'hi' ? {
   loading: 'स्रोत-समर्थित जानकारी लोड हो रही है…',
 } : {
   title: 'Hospitals & Schemes', hospitals: 'Hospitals', schemes: 'Government schemes',
-  search: 'Search by name', area: 'Facilities matched to your registered area',
-  availability: 'Confirm the requested service and current availability before travelling.',
-  areaMatched: 'Area matched', pmjay: 'PM-JAY listed', call: 'Call facility',
+  search: 'Search by name', pmjay: 'PM-JAY listed', call: 'Call facility',
   emptyFacilities: 'No source-backed facility was found for your registered area.',
   emptySchemes: 'No source-backed scheme is currently available for your state.',
   eligibility: 'Eligibility requires official verification.', documents: 'Required documents',
@@ -52,7 +62,8 @@ export const PatientFacilitiesTab: React.FC<PatientFacilitiesTabProps> = ({
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
   const filteredFacilities = facilities.filter((facility) =>
     !normalizedQuery || [facility.name, facility.facilityType, facility.district, facility.city]
-      .some((value) => value?.toLocaleLowerCase().includes(normalizedQuery)));
+      .some((value) => value?.toLocaleLowerCase().includes(normalizedQuery)))
+    .sort((left, right) => ownershipRank(left) - ownershipRank(right));
   const filteredSchemes = schemes.filter((scheme) =>
     !normalizedQuery || scheme.name.toLocaleLowerCase().includes(normalizedQuery));
 
@@ -90,18 +101,13 @@ export const PatientFacilitiesTab: React.FC<PatientFacilitiesTabProps> = ({
 
         {status === 'ready' && activeTab === 'facilities' && (
           <>
-            <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px] text-slate-300">
-              <p className="font-semibold text-emerald-300">{text.area}</p>
-              <p className="mt-1">{text.availability}</p>
-            </div>
             {!filteredFacilities.length && <p className="text-sm text-slate-400">{text.emptyFacilities}</p>}
             {filteredFacilities.map((facility) => (
               <article key={facility.id} className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-2.5">
                 <div>
                   <h3 className="text-sm font-bold text-white">{facility.name}</h3>
                   <div className="flex flex-wrap gap-1.5 mt-1">
-                    {facility.facilityType && <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">{facility.facilityType}</span>}
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-300">{text.areaMatched}</span>
+                    {facility.facilityType && <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">{ownershipLabel(facility, lang)}</span>}
                     {facility.pmjayListed && <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300">{text.pmjay}</span>}
                   </div>
                 </div>

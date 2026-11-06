@@ -275,8 +275,7 @@ export function MedicalReportsPanel({ sessionId, lang, onClose, onAskReport, onD
   return <div className="flex min-h-0 flex-1 flex-col bg-slate-950 text-slate-100">
     <header className="flex items-center gap-3 border-b border-slate-800 p-4">
       <button type="button" onClick={onClose} className="min-h-12 min-w-12 rounded-xl bg-slate-800" aria-label={hindi ? 'वापस' : 'Back'}><ArrowLeft className="mx-auto" /></button>
-      <div><h1 className="text-xl font-bold">{hindi ? 'मेरी रिपोर्ट' : 'My Health Reports'}</h1>
-        <p className="text-xs text-slate-300">{hindi ? 'रिपोर्ट सुरक्षित रखें और आसान भाषा में पढ़ें' : 'Keep and understand your reports'}</p></div>
+      <h1 className="text-xl font-bold">{hindi ? 'मेरी रिपोर्ट' : 'My Health Reports'}</h1>
     </header>
     <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 pb-8">
       <section className="space-y-3 rounded-2xl border border-slate-700 bg-slate-900 p-4">

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Preferences } from '@capacitor/preferences';
 import { Sparkles, Pill, Building2, User, FileText } from 'lucide-react';
 import { ChatMessage, ClinicalReviewFacility, Facility, FhirCondition, FhirDocument, FhirMedication, FhirObservation, HealthScheme, LanguageCode, PatientDemographics, UserProfile, userProfileToDemographics } from './types';
-import { getTranslation, playChime } from './utils/i18n';
+import { getTranslation, playChime, toUiLang } from './utils/i18n';
 import { apiService, VdaApiError, type PatientPrescriptionCurrentState, type PatientPrescriptionLatestSubmission } from './services/api';
 import { pendingPrescriptionChatContent } from './services/prescription-extraction-chat';
 import { authService } from './services/auth.service';
@@ -73,16 +73,8 @@ const createWelcomeMessage = (user?: UserProfile | null): ChatMessage => ({
   id: 'welcome-01', sender: 'vda', agent: 'router',
   text: user?.fullName ? `Namaste ${user.fullName} ji. I am Sehat Saathi, your health companion. How can I help you today?` : 'Namaste ji. I am Sehat Saathi, your health companion. How can I help you today?',
   textHi: user?.fullName ? `नमस्ते ${user.fullName} जी। मैं आपकी सेहत साथी हूँ। आज मैं आपकी क्या मदद कर सकती हूँ?` : 'नमस्ते जी। मैं आपकी सेहत साथी हूँ। आज मैं आपकी क्या मदद कर सकती हूँ?',
-  textTa: user?.fullName ? `வணக்கம் ${user.fullName} அவர்களே. நான் உங்கள் VDA சுகாதார உதவியாளர். இன்று உங்களுக்கு எவ்வாறு உதவலாம்?` : 'வணக்கம். நான் உங்கள் VDA சுகாதார உதவியாளர். இன்று உங்களுக்கு எவ்வாறு உதவலாம்?',
-  textKn: user?.fullName ? `ನಮಸ್ಕಾರ ${user.fullName} ಅವರೇ. ನಾನು ನಿಮ್ಮ VDA ಆರೋಗ್ಯ ಸಹಾಯಕ. ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?` : 'ನಮಸ್ಕಾರ. ನಾನು ನಿಮ್ಮ VDA ಆರೋಗ್ಯ ಸಹಾಯಕ. ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?',
   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-  audioAvailable: true,
-  quickActions: [
-    { label: 'My Medicines', labelHi: 'मेरी दवाइयां', labelTa: 'எனது மருந்துகள்', labelKn: 'ನನ್ನ ಔಷಧಿಗಳು', action: 'ask_medicines' },
-    { label: 'Explain Sugar Lab', labelHi: 'शुगर रिपोर्ट समझाएं', labelTa: 'சர்க்கரை சோதனை விளக்கம்', labelKn: 'ಸಕ್ಕರೆ ವರದಿ ವಿವರಣೆ', action: 'ask_sugar_lab' },
-    { label: 'Nearby Hospital', labelHi: 'नजदीकी अस्पताल', labelTa: 'அருகிலுள்ள மருத்துவமனை', labelKn: 'ಹತ್ತಿರದ ಆಸ್ಪತ್ರೆ', action: 'ask_hospital' },
-    { label: 'Ayushman PM-JAY', labelHi: 'आयुष्मान योजना लाभ', labelTa: 'ஆயுஷ்மான் திட்ட பலன்கள்', labelKn: 'ಆಯುಷ್ಮಾನ್ ಯೋಜನೆ', action: 'ask_scheme' },
-  ],
+  audioAvailable: true
 });
 
 export default function App() {
@@ -199,7 +191,7 @@ export default function App() {
       setDirectoryError(null);
       setCurrentUser(u);
       setSessionPersisted(authService.isSessionPersisted());
-      if (u?.language) setLang(u.language);
+      if (u?.language) setLang(toUiLang(u.language));
     });
     return () => { active = false; unsubscribe(); };
   }, []);
@@ -311,16 +303,8 @@ export default function App() {
       agent: 'router',
       text: `Namaste ji. I am Sehat Saathi, your health companion. How can I help you today?`,
       textHi: `नमस्ते जी। मैं आपकी सेहत साथी हूँ। आज मैं आपकी क्या मदद कर सकती हूँ?`,
-      textTa: `வணக்கம். நான் உங்கள் VDA சுகாதார உதவியாளர். இன்று உங்களுக்கு எவ்வாறு உதவலாம்?`,
-      textKn: `ನಮಸ್ಕಾರ. ನಾನು ನಿಮ್ಮ VDA ಆರೋಗ್ಯ ಸಹಾಯಕ. ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      audioAvailable: true,
-      quickActions: [
-        { label: 'My Medicines', labelHi: 'मेरी दवाइयां', labelTa: 'எனது மருந்துகள்', labelKn: 'ನನ್ನ ಔಷಧಿಗಳು', action: 'ask_medicines' },
-        { label: 'Explain Sugar Lab', labelHi: 'शुगर रिपोर्ट समझाएं', labelTa: 'சர்க்கரை சோதனை விளக்கம்', labelKn: 'ಸಕ್ಕರೆ ವರದಿ ವಿವರಣೆ', action: 'ask_sugar_lab' },
-        { label: 'Nearby Hospital', labelHi: 'नजदीकी अस्पताल', labelTa: 'அருகிலுள்ள மருத்துவமனை', labelKn: 'ಹತ್ತಿರದ ಆಸ್ಪತ್ರೆ', action: 'ask_hospital' },
-        { label: 'Ayushman PM-JAY', labelHi: 'आयुष्मान योजना लाभ', labelTa: 'ஆயுஷ்மான் திட்ட பலன்கள்', labelKn: 'ಆಯುಷ್ಮಾನ್ ಯೋಜನೆ', action: 'ask_scheme' }
-      ]
+      audioAvailable: true
     }
   ]);
 
@@ -334,8 +318,6 @@ export default function App() {
               ...prev[0],
               text: `Namaste ${currentUser.fullName} ji. I am Sehat Saathi, your health companion. How can I help you today?`,
               textHi: `नमस्ते ${currentUser.fullName} जी। मैं आपकी सेहत साथी हूँ। आज मैं आपकी क्या मदद कर सकती हूँ?`,
-              textTa: `வணக்கம் ${currentUser.fullName} அவர்களே. நான் உங்கள் VDA சுகாதார உதவியாளர். இன்று உங்களுக்கு எவ்வாறு உதவலாம்?`,
-              textKn: `ನಮಸ್ಕಾರ ${currentUser.fullName} ಅವರೇ. ನಾನು ನಿಮ್ಮ VDA ಆರೋಗ್ಯ ಸಹಾಯಕ. ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?`,
             },
             ...prev.slice(1)
           ];
@@ -392,8 +374,6 @@ export default function App() {
       agent: 'medication',
       text: textHi,
       textHi,
-      textTa: textHi,
-      textKn: textHi,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       audioAvailable: true,
       sections: options?.sections,
@@ -551,8 +531,6 @@ export default function App() {
                   agent: 'medication',
                   text: notice,
                   textHi: notice,
-                  textTa: notice,
-                  textKn: notice,
                   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                   audioAvailable: true,
                 }]);
@@ -960,8 +938,6 @@ export default function App() {
       sender: 'user',
       text: userText,
       textHi: userText,
-      textTa: userText,
-      textKn: userText,
       attachment: attachmentInfo,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
@@ -1308,8 +1284,6 @@ export default function App() {
       agent: 'lab_explainer',
       text: `Recorded new ${newObs.display} of ${newObs.value} ${newObs.unit} in this pilot app.`,
       textHi: `नया माप दर्ज किया गया: ${newObs.displayHi || newObs.display} (${newObs.value} ${newObs.unit})। आपके स्वास्थ्य रिकॉर्ड में सुरक्षित हो गया।`,
-      textTa: `புதிய அளவீடு பதிவு செய்யப்பட்டது: ${newObs.displayTa || newObs.display} (${newObs.value} ${newObs.unit})। உங்கள் சுகாதார பதிவில் சேர்க்கப்பட்டது.`,
-      textKn: `ಹೊಸ ರೀಡಿಂಗ್ ದಾಖಲಾಗಿದೆ: ${newObs.displayKn || newObs.display} (${newObs.value} ${newObs.unit})। ನಿಮ್ಮ ಆರೋಗ್ಯ ದಾಖಲೆಯಲ್ಲಿ ಸೇರಿಸಲಾಗಿದೆ.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       audioAvailable: true
     };
@@ -1366,7 +1340,7 @@ export default function App() {
         onLangChange={setLang}
         onAuthenticated={(u) => {
           setCurrentUser(u);
-          if (u.language) setLang(u.language);
+          if (u.language) setLang(toUiLang(u.language));
         }}
       />
     );
@@ -1554,7 +1528,7 @@ export default function App() {
               <Pill className="w-5 h-5" />
             </div>
             <span className="text-[11px] leading-tight">
-              {lang === 'hi' ? 'दवाइयां' : lang === 'ta' ? 'மருந்துகள்' : lang === 'kn' ? 'ಔಷಧಿಗಳು' : 'Medicines'}
+              {lang === 'hi' ? 'दवाइयां' : 'Medicines'}
             </span>
           </button>
 

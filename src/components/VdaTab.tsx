@@ -575,8 +575,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
     </span>
   );
 
-  const patientDistrict = lang === 'hi' ? (patient.districtHi || patient.district) : patient.district;
-  const patientState = patient.state;
+  const autoVoiceLabel = lang === 'hi' ? 'जवाब अपने-आप सुनाएँ' : 'Read answers aloud automatically';
   const activeMedicineReminders = medicineReminderSnapshot.activePrescription
     ? medicineReminderSnapshot.reminders.filter((reminder) => reminder.prescriptionId === medicineReminderSnapshot.activePrescription?.id)
     : [];
@@ -590,24 +589,15 @@ export const VdaTab: React.FC<VdaTabProps> = ({
             <Sparkles className="w-5 h-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <h1 className="text-sm font-bold text-white tracking-tight truncate">{patient.name}</h1>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-medium whitespace-nowrap">
-                Pilot profile
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 truncate">
-              {patientDistrict}, {patientState} • NCD Care
-            </p>
+            <h1 className="text-sm font-bold text-white tracking-tight leading-tight break-words">{patient.name}</h1>
           </div>
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <button type="button" onClick={toggleAutoVoice} aria-pressed={autoVoiceEnabled}
-            className="flex items-center gap-1 rounded-xl border border-slate-700 px-2.5 py-1.5 text-xs text-slate-200"
-            title={autoVoiceEnabled ? 'Turn automatic voice off' : 'Turn automatic voice on'}>
-            {autoVoiceEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-            <span>{autoVoiceEnabled ? 'Auto voice on' : 'Auto voice off'}</span>
+            aria-label={autoVoiceLabel} title={autoVoiceLabel}
+            className="flex items-center justify-center rounded-xl border border-slate-700 p-2 text-slate-200">
+            {autoVoiceEnabled ? <Volume2 className="w-4 h-4" aria-hidden="true" /> : <VolumeX className="w-4 h-4" aria-hidden="true" />}
           </button>
           {/* Emergency Quick Dial Trigger */}
           <button
@@ -619,17 +609,19 @@ export const VdaTab: React.FC<VdaTabProps> = ({
             <span>SOS</span>
           </button>
 
-          {/* Test the same backend SafetyGate path used by a patient message. */}
-          <button
-            id="trigger-test-safety-btn"
-            onClick={() => onTriggerEscalation('Severe chest tightness and left arm numbness')}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 text-xs font-semibold transition-colors active:scale-95 whitespace-nowrap"
-            title="Test backend SafetyGate clinical escalation"
-          >
-            <AlertTriangle className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{getTranslation(lang, 'safetyGateBadge')}</span>
-            <span className="sm:hidden">Gate</span>
-          </button>
+          {/* Dev-only test of the same backend SafetyGate path used by a patient message. */}
+          {import.meta.env.DEV && (
+            <button
+              id="trigger-test-safety-btn"
+              onClick={() => onTriggerEscalation('Severe chest tightness and left arm numbness')}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 text-xs font-semibold transition-colors active:scale-95 whitespace-nowrap"
+              title="Test backend SafetyGate clinical escalation"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{getTranslation(lang, 'safetyGateBadge')}</span>
+              <span className="sm:hidden">Gate</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -921,7 +913,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
           <div className="flex max-w-[85%] items-center gap-2 rounded-2xl rounded-bl-none border border-emerald-500/30 bg-slate-900 px-3.5 py-3 text-xs text-emerald-100 shadow-sm" role="status" aria-live="polite">
             <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-emerald-400" />
             <div>
-              <p className="font-semibold">{lang === 'hi' ? 'VDA आपका प्रश्न समझ रहा है…' : lang === 'en' ? 'VDA is preparing your answer…' : getTranslation(lang, 'processing')}</p>
+              <p className="font-semibold">{lang === 'hi' ? 'सेहत साथी आपका प्रश्न समझ रही है…' : lang === 'en' ? 'VDA is preparing your answer…' : getTranslation(lang, 'processing')}</p>
               <p className="mt-0.5 text-[10px] text-slate-400">{lang === 'hi' ? 'कृपया एक क्षण प्रतीक्षा करें' : 'Please wait a moment'}</p>
             </div>
           </div>
@@ -1117,7 +1109,6 @@ export const VdaTab: React.FC<VdaTabProps> = ({
                 className="p-4 rounded-2xl bg-red-950/60 border border-red-500/40 flex items-center justify-between text-white hover:bg-red-900/50 transition-all"
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-2xl">🚑</span>
                   <div>
                     <h4 className="text-base font-extrabold">{getTranslation(lang, 'ambulance108')}</h4>
                     <p className="text-xs text-red-300">National Ambulance Service</p>
@@ -1131,7 +1122,6 @@ export const VdaTab: React.FC<VdaTabProps> = ({
                 className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 flex items-center justify-between text-white hover:bg-emerald-900/50 transition-all"
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-2xl">🩺</span>
                   <div>
                     <h4 className="text-base font-extrabold">{getTranslation(lang, 'healthHelpline104')}</h4>
                     <p className="text-xs text-emerald-300">State Medical Advice & Tele-Triage</p>
@@ -1145,7 +1135,6 @@ export const VdaTab: React.FC<VdaTabProps> = ({
                 className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between text-white hover:bg-slate-850 transition-all"
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-2xl">🚨</span>
                   <div>
                     <h4 className="text-base font-extrabold">{getTranslation(lang, 'emergency112')}</h4>
                     <p className="text-xs text-slate-400">All-in-One Emergency SOS</p>
@@ -1159,7 +1148,6 @@ export const VdaTab: React.FC<VdaTabProps> = ({
                 className="p-4 rounded-2xl bg-amber-950/50 border border-amber-500/40 flex items-center justify-between text-white hover:bg-amber-900/50 transition-all"
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-2xl">💳</span>
                   <div>
                     <h4 className="text-base font-extrabold">{getTranslation(lang, 'ayushman14555')}</h4>
                     <p className="text-xs text-amber-300">PM-JAY Health Coverage Helpline</p>

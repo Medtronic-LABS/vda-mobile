@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   Globe,
-  ShieldCheck, 
   LogOut, 
   Check, 
   User, 
@@ -14,7 +13,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { LanguageCode, UserProfile } from '../types';
-import { getTranslation, playChime } from '../utils/i18n';
+import { getTranslation, playChime, toUiLang } from '../utils/i18n';
 import { authService } from '../services/auth.service';
 
 interface ProfileTabProps {
@@ -131,8 +130,6 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
   const t = {
     hi: {
       profileTab: 'मेरी प्रोफ़ाइल',
-      verifiedUser: 'सत्यापित उपयोगकर्ता',
-      abhaCardTitle: 'डिजिटल स्वास्थ्य प्रोफ़ाइल',
       viewQr: 'QR कोड देखें',
       editProfile: 'प्रोफ़ाइल बदलें',
       phone: 'मोबाइल नंबर',
@@ -140,7 +137,6 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
       location: 'स्थान',
       language: 'पसंदीदा भाषा',
       abhaNumber: 'ABHA स्वास्थ्य खाता',
-      privacyPromise: '🔒 आपका प्रोफ़ाइल और अपलोड की गई पर्ची VDA सेवा द्वारा सुरक्षित रूप से प्रोसेस और सेव की जा सकती है। रिमाइंडर समय इस फोन में सेव रहते हैं।',
       clearLocalData: 'स्थानीय दवा व पर्ची डेटा साफ़ करें',
       signOut: 'लॉग आउट (Sign Out)',
       saveChanges: 'परिवर्तन सहेजें',
@@ -151,8 +147,6 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
     },
     en: {
       profileTab: 'My Profile',
-      verifiedUser: 'Verified User',
-      abhaCardTitle: 'Digital Health Profile',
       viewQr: 'View QR Code',
       editProfile: 'Edit Profile',
       phone: 'Mobile Number',
@@ -160,7 +154,6 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
       location: 'Location',
       language: 'Language',
       abhaNumber: 'ABHA Number',
-      privacyPromise: '🔒 Your profile and uploaded prescription may be securely processed and stored by the VDA service. Reminder times stay on this phone.',
       clearLocalData: 'Clear Local Prescription & Reminder Data',
       signOut: 'Sign Out',
       saveChanges: 'Save Changes',
@@ -169,47 +162,7 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
       genderFemale: 'Female',
       genderOther: 'Other',
     },
-    ta: {
-      profileTab: 'எனது சுயவிவரம்',
-      verifiedUser: 'சரிபார்க்கப்பட்ட பயனர்',
-      abhaCardTitle: 'டிஜிட்டல் சுகாதார சுயவிவரம்',
-      viewQr: 'QR குறியீட்டைக் காண்க',
-      editProfile: 'சுயவிவரத்தைத் திருத்து',
-      phone: 'மொபைல் எண்',
-      ageGender: 'வயது / பாலினம்',
-      location: 'இடம்',
-      language: 'மொழி',
-      abhaNumber: 'ABHA எண்',
-      privacyPromise: '🔒 உங்கள் சுயவிவரமும் பதிவேற்றிய மருந்துச் சீட்டும் VDA சேவையால் பாதுகாப்பாக செயலாக்கப்பட்டு சேமிக்கப்படலாம். நினைவூட்டல் நேரங்கள் இந்த தொலைபேசியில் இருக்கும்.',
-      clearLocalData: 'சாதனத் தரவை அழிக்கவும்',
-      signOut: 'வெளியேறு (Sign Out)',
-      saveChanges: 'சேமிக்க',
-      cancel: 'ரத்து செய்',
-      genderMale: 'ஆண்',
-      genderFemale: 'பெண்',
-      genderOther: 'மற்றவை',
-    },
-    kn: {
-      profileTab: 'ನನ್ನ ಪ್ರೊಫೈಲ್',
-      verifiedUser: 'ದೃಢೀಕೃತ ಬಳಕೆದಾರ',
-      abhaCardTitle: 'ಡಿಜಿಟಲ್ ಆರೋಗ್ಯ ಪ್ರೊಫೈಲ್',
-      viewQr: 'QR ಕೋಡ್ ವೀಕ್ಷಿಸಿ',
-      editProfile: 'ಪ್ರೊಫೈಲ್ ತಿದ್ದುಪಡಿ',
-      phone: 'ಮೊಬೈಲ್ ಸಂಖ್ಯೆ',
-      ageGender: 'ವಯಸ್ಸು / ಲಿಂಗ',
-      location: 'ಸ್ಥಳ',
-      language: 'ಭಾಷೆ',
-      abhaNumber: 'ABHA ಸಂಖ್ಯೆ',
-      privacyPromise: '🔒 ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಮತ್ತು ಅಪ್‌ಲೋಡ್ ಮಾಡಿದ ಪ್ರಿಸ್ಕ್ರಿಪ್ಷನ್ ಅನ್ನು VDA ಸೇವೆ ಸುರಕ್ಷಿತವಾಗಿ ಪ್ರಕ್ರಿಯೆಗೊಳಿಸಿ ಸಂಗ್ರಹಿಸಬಹುದು. ರಿಮೈಂಡರ್ ಸಮಯಗಳು ಈ ಫೋನ್‌ನಲ್ಲೇ ಇರುತ್ತವೆ.',
-      clearLocalData: 'ಸ್ಥಳೀಯ ಡೇಟಾ ಅಳಿಸಿ',
-      signOut: 'ಸೈನ್ ಔಟ್ (Sign Out)',
-      saveChanges: 'ಉಳಿಸಿ',
-      cancel: 'ರದ್ದು',
-      genderMale: 'ಪುರುಷ',
-      genderFemale: 'ಮಹಿಳೆ',
-      genderOther: 'ಇತರ',
-    }
-  }[lang];
+  }[toUiLang(lang)];
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-950 text-slate-100 overflow-hidden">
@@ -219,9 +172,6 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
           <h1 className="text-sm font-bold text-white tracking-tight flex items-center gap-1.5">
             <User className="w-4 h-4 text-emerald-400" />
             <span>{t.profileTab}</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono">
-              {t.verifiedUser}
-            </span>
           </h1>
         </div>
 
@@ -239,15 +189,6 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-12">
         {/* User Card */}
         <div className="p-5 rounded-3xl bg-gradient-to-tr from-slate-900 via-emerald-950/80 to-teal-900 border-2 border-emerald-500/40 shadow-xl shadow-emerald-950/50 relative overflow-hidden">
-          <div className="flex items-start justify-between mb-3">
-            <div>
-              <p className="text-[10px] font-bold tracking-wider uppercase text-emerald-400">
-                National Health Authority • VDA
-              </p>
-              <h2 className="text-base font-extrabold text-white">{t.abhaCardTitle}</h2>
-            </div>
-          </div>
-
           {/* User Details */}
           <div className="space-y-1.5 mb-4">
             <h3 className="text-lg font-black text-white">{user.fullName}</h3>
@@ -276,8 +217,8 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
             </div>
             <div className="p-2 rounded-xl bg-black/30">
               <span className="text-[10px] text-slate-400">{t.language}</span>
-              <p className="font-bold text-white mt-0.5 uppercase">
-                {user.language || lang}
+              <p className="font-bold text-white mt-0.5">
+                {toUiLang(user.language || lang) === 'en' ? 'English' : 'हिन्दी'}
               </p>
             </div>
           </div>
@@ -297,8 +238,6 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
             {[
               { code: 'hi' as LanguageCode, label: 'हिन्दी (Hindi)' },
               { code: 'en' as LanguageCode, label: 'English' },
-              { code: 'ta' as LanguageCode, label: 'தமிழ் (Tamil)' },
-              { code: 'kn' as LanguageCode, label: 'ಕನ್ನಡ (Kannada)' }
             ].map((l) => (
               <button
                 key={l.code}
@@ -318,14 +257,6 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
               </button>
             ))}
           </div>
-        </div>
-
-        {/* PRIVACY PROMISE */}
-        <div className="p-4 rounded-2xl bg-slate-900/50 border border-emerald-500/20 flex items-start gap-2.5 text-slate-300 text-xs">
-          <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-          <p className="text-[11px] leading-relaxed text-slate-400">
-            {t.privacyPromise}
-          </p>
         </div>
 
         {/* CLEAR LOCAL DATA */}

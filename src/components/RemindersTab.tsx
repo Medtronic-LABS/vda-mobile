@@ -20,7 +20,7 @@ import {
   PatientAdherenceAction,
   PrescriptionReminderDraft,
 } from '../services/medicine-reminder.service';
-import { playChime } from '../utils/i18n';
+import { playChime, toUiLang, type UiLanguage } from '../utils/i18n';
 import type { PatientPrescriptionLatestSubmission } from '../services/api';
 
 interface RemindersTabProps {
@@ -57,7 +57,6 @@ export const RemindersTab: React.FC<RemindersTabProps> = ({
   const t = {
     hi: {
       title: 'मेरी दवाइयां व रिमाइंडर',
-      subtitle: 'रिमाइंडर समय इस फ़ोन में सेव रहते हैं',
       uploadRx: 'पर्ची अपलोड करें',
       configureReminders: 'रिमाइंडर समय चुनें',
       verifiedPrescription: 'स्वास्थ्यकर्मी द्वारा सत्यापित दवाइयाँ',
@@ -86,13 +85,11 @@ export const RemindersTab: React.FC<RemindersTabProps> = ({
       taken: 'पूर्ण',
       noReminders: 'अभी कोई दवा रिमाइंडर नहीं है।',
       noRemindersSub: 'डॉक्टर का पर्चा अपलोड करें या अपनी दवाइयां जोड़ें।',
-      privacyNotice: '🔒 पर्ची VDA सेवा द्वारा प्रोसेस और सेव की जा सकती है। आपके चुने रिमाइंडर समय इस फ़ोन में रहते हैं।',
       clearAll: 'सभी रिमाइंडर हटाएं',
       confirmClear: 'क्या आप वाकई सभी रिमाइंडर हटाना चाहते हैं?'
     },
     en: {
       title: 'My Medicines & Reminders',
-      subtitle: 'Reminder times are stored on this phone',
       uploadRx: 'Upload Prescription',
       configureReminders: 'Choose reminder times',
       verifiedPrescription: 'Medicines verified by a health worker',
@@ -121,81 +118,10 @@ export const RemindersTab: React.FC<RemindersTabProps> = ({
       taken: 'Taken',
       noReminders: 'No active medicine reminders.',
       noRemindersSub: 'Upload a prescription or add your medications to begin.',
-      privacyNotice: '🔒 Prescriptions may be processed and stored by the VDA service. Your chosen reminder times stay on this phone.',
       clearAll: 'Clear All Reminders',
       confirmClear: 'Are you sure you want to delete all local reminders?'
     },
-    ta: {
-      title: 'எனது மருந்துகள் & நினைவூட்டல்',
-      subtitle: 'நினைவூட்டல் நேரங்கள் இந்த தொலைபேசியில் இருக்கும்',
-      uploadRx: 'மருந்துச் சீட்டைப் பதிவேற்றவும்',
-      configureReminders: 'நினைவூட்டல் நேரத்தைத் தேர்வு செய்க',
-      verifiedPrescription: 'சுகாதாரப் பணியாளர் சரிபார்த்த மருந்துகள்',
-      verifiedNoReminders: 'இந்த மருந்துகளுக்கு நினைவூட்டல் நேரம் இன்னும் தேர்வு செய்யப்படவில்லை.',
-      pendingVerification: 'உங்கள் மருந்துச் சீட்டு சுகாதாரப் பணியாளர் சரிபார்ப்பில் உள்ளது.',
-      verificationPending: 'சரிபார்ப்பு நடைபெறுகிறது',
-      rejectedPrescription: 'மருந்துச் சீட்டை சரிபார்க்க முடியவில்லை. சரியான சீட்டை பதிவேற்றவும்.',
-      resubmitPrescription: 'மருந்துச் சீட்டு தெளிவாக இல்லை. தெளிவான படம் அல்லது PDF ஐ மீண்டும் பதிவேற்றவும்.',
-      rejectedTitle: 'மருந்துச் சீட்டு ஏற்கப்படவில்லை',
-      resubmitTitle: 'தெளிவான மருந்துச் சீட்டு தேவை',
-      rejectedFallback: 'சுகாதாரப் பணியாளர் இந்த மருந்துச் சீட்டைச் சரிபார்க்க முடியவில்லை.',
-      resubmitFallback: 'சுகாதாரப் பணியாளருக்கு தெளிவான படம் அல்லது PDF தேவை.',
-      rejectedGuidance: 'மேலும் விளக்கத்திற்கு சுகாதாரப் பணியாளரை தொடர்பு கொள்ளுங்கள். சரியான அல்லது புதிய சீட்டை மீண்டும் பதிவேற்றலாம்.',
-      resubmitGuidance: 'முழு மருந்துச் சீட்டும் தெளிவாகத் தெரியும்படி புதிய படம் அல்லது PDF ஐ பதிவேற்றவும்.',
-      submitAgain: 'மற்றொரு சீட்டை பதிவேற்றவும்',
-      todayProgress: 'இன்றைய மருந்துகள்',
-      remindersCompleted: 'மருந்துகள் எடுத்ததாக பதிவு',
-      streakDays: 'நாட்கள் தொடர்ச்சி',
-      notificationsOff: 'அறிவிப்புகள் முடக்கப்பட்டுள்ளன.',
-      notificationsUnavailable: 'இந்த உலாவியில் சாதன அறிவிப்புகளை திட்டமிட முடியாது. நேர அலர்ட்களுக்கு Android பயன்பாட்டைப் பயன்படுத்தவும்.',
-      enableNotifications: 'அறிவிப்புகளை இயக்கு',
-      scheduleMorning: 'காலை அளவு',
-      scheduleAfternoon: 'மதிய அளவு',
-      scheduleEvening: 'இரவு அளவு',
-      markTaken: 'எடுத்துக்கொண்டேன்',
-      taken: 'முடிந்தது',
-      noReminders: 'நினைவூட்டல்கள் எதுவும் இல்லை.',
-      noRemindersSub: 'தொடங்க மருந்துச் சீட்டைப் பதிவேற்றவும்.',
-      privacyNotice: '🔒 மருந்துச் சீட்டு VDA சேவையால் செயலாக்கப்பட்டு சேமிக்கப்படலாம். நினைவூட்டல் நேரங்கள் இந்த தொலைபேசியில் இருக்கும்.',
-      clearAll: 'அனைத்தையும் நீக்கு',
-      confirmClear: 'நிச்சயமாக நீக்க விரும்புகிறீர்களா?'
-    },
-    kn: {
-      title: 'ನನ್ನ ಔಷಧಿಗಳು & ಜ್ಞಾಪನೆ',
-      subtitle: 'ರಿಮೈಂಡರ್ ಸಮಯಗಳು ಈ ಫೋನ್‌ನಲ್ಲಿ ಇರುತ್ತವೆ',
-      uploadRx: 'ಚೀಟಿ ಅಪ್‌ಲೋಡ್ ಮಾಡಿ',
-      configureReminders: 'ಜ್ಞಾಪನೆ ಸಮಯ ಆಯ್ಕೆಮಾಡಿ',
-      verifiedPrescription: 'ಆರೋಗ್ಯ ಕಾರ್ಯಕರ್ತರು ಪರಿಶೀಲಿಸಿದ ಔಷಧಿಗಳು',
-      verifiedNoReminders: 'ಈ ಔಷಧಿಗಳಿಗೆ ಜ್ಞಾಪನೆ ಸಮಯವನ್ನು ಇನ್ನೂ ಆಯ್ಕೆ ಮಾಡಿಲ್ಲ.',
-      pendingVerification: 'ನಿಮ್ಮ ಚೀಟಿ ಆರೋಗ್ಯ ಕಾರ್ಯಕರ್ತರ ಪರಿಶೀಲನೆಯಲ್ಲಿದೆ.',
-      verificationPending: 'ಪರಿಶೀಲನೆ ನಡೆಯುತ್ತಿದೆ',
-      rejectedPrescription: 'ಚೀಟಿಯನ್ನು ಪರಿಶೀಲಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ಸರಿಯಾದ ಚೀಟಿಯನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ.',
-      resubmitPrescription: 'ಚೀಟಿ ಸ್ಪಷ್ಟವಾಗಿಲ್ಲ. ಸ್ಪಷ್ಟವಾದ ಚಿತ್ರ ಅಥವಾ PDF ಅನ್ನು ಮತ್ತೆ ಅಪ್‌ಲೋಡ್ ಮಾಡಿ.',
-      rejectedTitle: 'ಚೀಟಿಯನ್ನು ಸ್ವೀಕರಿಸಲಾಗಿಲ್ಲ',
-      resubmitTitle: 'ಸ್ಪಷ್ಟವಾದ ಚೀಟಿ ಅಗತ್ಯವಿದೆ',
-      rejectedFallback: 'ಆರೋಗ್ಯ ಕಾರ್ಯಕರ್ತರು ಈ ಚೀಟಿಯನ್ನು ಪರಿಶೀಲಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.',
-      resubmitFallback: 'ಆರೋಗ್ಯ ಕಾರ್ಯಕರ್ತರಿಗೆ ಸ್ಪಷ್ಟವಾದ ಚಿತ್ರ ಅಥವಾ PDF ಅಗತ್ಯವಿದೆ.',
-      rejectedGuidance: 'ಕಾರಣ ತಿಳಿಯಲು ಆರೋಗ್ಯ ಕಾರ್ಯಕರ್ತರನ್ನು ಸಂಪರ್ಕಿಸಿ. ಸರಿಯಾದ ಅಥವಾ ಹೊಸ ಚೀಟಿಯನ್ನು ಮತ್ತೆ ಅಪ್‌ಲೋಡ್ ಮಾಡಬಹುದು.',
-      resubmitGuidance: 'ಪೂರ್ಣ ಚೀಟಿ ಸ್ಪಷ್ಟವಾಗಿ ಕಾಣುವಂತೆ ಹೊಸ ಚಿತ್ರ ಅಥವಾ PDF ಅನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ.',
-      submitAgain: 'ಮತ್ತೊಂದು ಚೀಟಿ ಅಪ್‌ಲೋಡ್ ಮಾಡಿ',
-      todayProgress: 'ಇಂದಿನ ಔಷಧಿ ಪ್ರಗತಿ',
-      remindersCompleted: 'ತೆಗೆದುಕೊಂಡ ಔಷಧಿಗಳು',
-      streakDays: 'ದಿನಗಳ ಸತತ ಬಳಕೆ',
-      notificationsOff: 'ಅಧಿಸೂಚನೆಗಳು ಆಫ್ ಆಗಿವೆ.',
-      notificationsUnavailable: 'ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಸಾಧನ ಅಧಿಸೂಚನೆಗಳನ್ನು ನಿಗದಿಪಡಿಸಲಾಗುವುದಿಲ್ಲ. ಸಮಯದ ಫೋನ್ ಎಚ್ಚರಿಕೆಗಳಿಗೆ Android ಅಪ್ಲಿಕೇಶನ್ ಬಳಸಿ.',
-      enableNotifications: 'ಅಧಿಸೂಚನೆಗಳನ್ನು ಆನ್ ಮಾಡಿ',
-      scheduleMorning: 'ಬೆಳಗಿನ ಡೋಸ್',
-      scheduleAfternoon: 'ಮಧ್ಯಾಹ್ನದ ಡೋಸ್',
-      scheduleEvening: 'ರಾತ್ರಿಯ ಡೋಸ್',
-      markTaken: 'ತೆಗೆದುಕೊಂಡಿದ್ದೇನೆ',
-      taken: 'ತೆಗೆದುಕೊಂಡಾಗಿದೆ',
-      noReminders: 'ಯಾವುದೇ ಜ್ಞಾಪನೆಗಳಿಲ್ಲ.',
-      noRemindersSub: 'ಪ್ರಾರಂಭಿಸಲು ವೈದ್ಯರ ಚೀಟಿ ಅಪ್‌ಲೋಡ್ ಮಾಡಿ.',
-      privacyNotice: '🔒 ಪ್ರಿಸ್ಕ್ರಿಪ್ಷನ್ ಅನ್ನು VDA ಸೇವೆ ಪ್ರಕ್ರಿಯೆಗೊಳಿಸಿ ಸಂಗ್ರಹಿಸಬಹುದು. ರಿಮೈಂಡರ್ ಸಮಯಗಳು ಈ ಫೋನ್‌ನಲ್ಲಿ ಇರುತ್ತವೆ.',
-      clearAll: 'ಎಲ್ಲವನ್ನೂ ತೆರವುಗೊಳಿಸಿ',
-      confirmClear: 'ಖಚಿತವಾಗಿ ಅಳಿಸಲು ಬಯಸುವಿರಾ?'
-    }
-  }[lang];
+  }[toUiLang(lang)];
 
   const verifiedPrescription = snapshot.activePrescription?.verificationStatus === 'VERIFIED'
     && snapshot.activePrescription.activePlan
@@ -210,12 +136,12 @@ export const RemindersTab: React.FC<RemindersTabProps> = ({
   const isPendingVerification = Boolean(pendingSubmission) || verificationStatus === 'PENDING_VERIFICATION' || verificationStatus === 'UNVERIFIED';
   const hasDecisionGuidance = verificationStatus === 'REJECTED' || verificationStatus === 'NEEDS_RESUBMISSION';
   const hasConfiguredReminders = snapshot.reminders.length > 0;
+  // Same condition as the empty-state card below, which carries its own upload button.
+  const showEmptyState = !hasConfiguredReminders && !verifiedPrescription && !isPendingVerification && !hasDecisionGuidance;
 
-  const adherenceText: Record<LanguageCode, Record<PatientAdherenceAction | 'SNOOZED', string>> = {
+  const adherenceText: Record<UiLanguage, Record<PatientAdherenceAction | 'SNOOZED', string>> = {
     hi: { TAKEN: 'ले ली', SKIPPED: 'छोड़ दी', NOT_TAKEN: 'नहीं ली', SNOOZED: 'बाद में' },
     en: { TAKEN: 'Taken', SKIPPED: 'Skip', NOT_TAKEN: 'Not taken', SNOOZED: 'Later' },
-    ta: { TAKEN: 'எடுத்தேன்', SKIPPED: 'தவிர்த்தேன்', NOT_TAKEN: 'எடுக்கவில்லை', SNOOZED: 'பிறகு' },
-    kn: { TAKEN: 'ತೆಗೆದುಕೊಂಡೆ', SKIPPED: 'ಬಿಟ್ಟೆ', NOT_TAKEN: 'ತೆಗೆದುಕೊಳ್ಳಲಿಲ್ಲ', SNOOZED: 'ನಂತರ' },
   };
 
   const handleRecordAdherence = async (reminder: LocalMedicineReminder, time: string, action: PatientAdherenceAction) => {
@@ -264,11 +190,10 @@ export const RemindersTab: React.FC<RemindersTabProps> = ({
             <Pill className="w-4 h-4 text-emerald-400" />
             <span>{t.title}</span>
           </h1>
-          <p className="text-[10px] text-emerald-400 font-medium">{t.subtitle}</p>
         </div>
 
         {/* A verified plan configures reminders; only an absent/unusable plan asks for upload. */}
-        {isPendingVerification && !verifiedPrescription ? (
+        {showEmptyState ? null : isPendingVerification && !verifiedPrescription ? (
           <span className="rounded-xl border border-amber-500/30 bg-amber-950/30 px-3 py-1.5 text-[11px] font-bold text-amber-200">
             {t.verificationPending}
           </span>
@@ -318,7 +243,7 @@ export const RemindersTab: React.FC<RemindersTabProps> = ({
               <Clock className="h-4 w-4" />
               <h3 className="text-sm font-bold">{lang === 'hi' ? 'आपकी नई पर्ची से मिली जानकारी' : 'Information found in your new prescription'}</h3>
             </div>
-            <p className="text-xs font-semibold text-amber-100">{lang === 'hi' ? '⏳ सत्यापन बाकी है' : '⏳ Verification pending'}</p>
+            <p className="text-xs font-semibold text-amber-100">{lang === 'hi' ? 'सत्यापन बाकी है' : 'Verification pending'}</p>
             {pendingSubmission.extractionStatus === 'REVIEW_REQUIRED' && (
               <p className="text-xs text-amber-100">{lang === 'hi' ? 'कुछ लिखावट साफ़ नहीं है। नीचे दी गई जानकारी की स्वास्थ्यकर्मी जाँच करेंगे।' : 'Some extracted information is unclear and needs health-worker review.'}</p>
             )}
@@ -355,7 +280,7 @@ export const RemindersTab: React.FC<RemindersTabProps> = ({
           </section>
         )}
         {/* Adherence Progress Banner */}
-        <div className="p-4 rounded-3xl bg-gradient-to-tr from-slate-900 via-emerald-950/60 to-slate-900 border border-emerald-500/30 shadow-lg relative overflow-hidden">
+        {hasConfiguredReminders && <div className="p-4 rounded-3xl bg-gradient-to-tr from-slate-900 via-emerald-950/60 to-slate-900 border border-emerald-500/30 shadow-lg relative overflow-hidden">
           <div className="flex items-center justify-between mb-2">
             <div>
               <p className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
@@ -387,7 +312,7 @@ export const RemindersTab: React.FC<RemindersTabProps> = ({
               <span>{snapshot.progress.currentStreakDays} {t.streakDays}</span>
             </div>
           )}
-        </div>
+        </div>}
 
         {/* Notification Permission Callout */}
         {snapshot.notificationPermission !== 'granted' && (
@@ -523,11 +448,11 @@ export const RemindersTab: React.FC<RemindersTabProps> = ({
                                 : 'border border-slate-600 text-slate-200 hover:border-emerald-500/50'}`}
                             >
                               {outcome === action && action === 'TAKEN' && <Check className="mr-1 inline h-3 w-3" />}
-                              {adherenceText[lang][action]}
+                              {adherenceText[toUiLang(lang)][action]}
                             </button>
                           ))}
                           <button type="button" onClick={() => void handleSnooze(reminder, time)} disabled={isBusy} className="px-2 py-1 rounded-lg border border-slate-700 text-[10px] font-semibold text-slate-400">
-                            {adherenceText[lang].SNOOZED}
+                            {adherenceText[toUiLang(lang)].SNOOZED}
                           </button>
                         </div>
                       </div>
@@ -549,14 +474,6 @@ export const RemindersTab: React.FC<RemindersTabProps> = ({
             </div>
           </div>
         )}
-
-        {/* Privacy Assurance Card */}
-        <div className="p-4 rounded-2xl bg-slate-900/40 border border-slate-800/80 flex items-start gap-2.5 text-slate-400 text-xs">
-          <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-          <p className="text-[11px] leading-relaxed">
-            {t.privacyNotice}
-          </p>
-        </div>
       </div>
     </div>
   );

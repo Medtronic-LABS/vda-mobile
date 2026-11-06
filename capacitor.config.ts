@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'in.gov.abdm.vdahealth',
-  appName: 'VDA Health Assistant',
+  appName: 'Sehat Saathi',
   webDir: 'dist',
   server: {
     androidScheme: 'https',

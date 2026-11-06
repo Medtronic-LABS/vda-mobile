@@ -2,26 +2,33 @@
  * VDA Mobile — i18n & Accessibility Unit Tests
  *
  * Validates:
- * - Full parity of translation keys across Hindi, English, Tamil, Kannada
+ * - Full parity of translation keys across Hindi and English (the only UI languages)
  * - Chime synthesizer for start, stop, alert, and chime tones
  * - Speech synthesis invocation and voice configuration
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { TRANSLATIONS, playChime, speakText, stopSpeaking } from '../i18n';
-import { LanguageCode } from '../../types';
+import { TRANSLATIONS, getTranslation, playChime, speakText, stopSpeaking, toUiLang } from '../i18n';
 
 describe('VDA Mobile — i18n & Multilingual Parity', () => {
-  const languages: LanguageCode[] = ['hi', 'en', 'ta', 'kn'];
+  const languages = ['hi', 'en'] as const;
   const baseKeys = Object.keys(TRANSLATIONS.hi);
 
-  it('should define translations for all 4 supported Indic languages', () => {
+  it('should define translations for Hindi and English', () => {
     for (const lang of languages) {
       expect(TRANSLATIONS[lang]).toBeDefined();
       expect(typeof TRANSLATIONS[lang]).toBe('object');
     }
   });
 
-  it('should maintain key parity across all 4 languages', () => {
+  it('falls back to Hindi for a stored Tamil or Kannada profile language', () => {
+    expect(toUiLang('en')).toBe('en');
+    expect(toUiLang('ta')).toBe('hi');
+    expect(toUiLang('kn')).toBe('hi');
+    expect(toUiLang(undefined)).toBe('hi');
+    expect(getTranslation('kn', 'tabVda')).toBe(TRANSLATIONS.hi.tabVda);
+  });
+
+  it('should maintain key parity across Hindi and English', () => {
     for (const lang of languages) {
       const langKeys = Object.keys(TRANSLATIONS[lang]);
       expect(langKeys.length).toBeGreaterThanOrEqual(baseKeys.length * 0.9);
