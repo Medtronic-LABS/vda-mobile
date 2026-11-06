@@ -294,12 +294,12 @@ export const classifyAdherenceQuestion = (query: string): 'PENDING' | 'MISSED' |
   // Status is device-local, but a combined status + dosing decision must use
   // the backend clinical safety route rather than this local answer.
   if (isUnsafeMedicineAction(query)
-    || /(?:\b(?:should i|can i|what should i|kya main|abhi|now)\b.{0,40}\b(?:take|skip|double|le\s*lu|loon|lena)\b|(?:क्या\s*मैं|अभी|अब).{0,40}(?:ले\s*लूं|ले\s*लूँ|छोड़\s*दूं|दोगुनी))/i.test(query)) return null;
+    || /(?:\b(?:should i|can i|what should i|kya main|abhi|now)\b.{0,40}\b(?:take|skip|double|le\s*lu|loon|lena)\b|(?:क्या\s*मैं|अभी|अब).{0,40}(?:ले\s*लूं|ले\s*लूँ|छोड़\s*दूं|दोगुनी)|\bkya\s*kar(?:u|un|oon)\b|क्या\s*कर(?:ूँ|ूं|ें))/i.test(query)) return null;
   if (/\b(?:galti|galat|accidental(?:ly)?|mistake|wrong)\b.{0,45}\b(?:taken|mark|le\s*li|liya)\b|गलती.{0,45}(?:ले ली|मार्क|दर्ज)/i.test(query)) return 'CORRECTION';
   if (/\b(?:streak|lagatar|continuous)\b|लगातार.{0,25}(?:दिन|दवा)|स्ट्रीक/i.test(query)) return 'STREAK';
   const medicine = medicineQuestionPattern.test(query);
-  if (medicine && /\b(?:pending|remaining|left to take|baaki|baki)\b|बाकी|लंबित/i.test(query)) return 'PENDING';
-  if (medicine && /\b(?:missed|skip(?:ped)?|bhool|chhoot)\b|छूट|भूल/i.test(query)
+  if (medicine && /\b(?:pending|remaining|left to take|baaki|baki)\b|बाकी|लंबित|पेंडिंग/i.test(query)) return 'PENDING';
+  if (medicine && /\b(?:miss(?:ed)?|skip(?:ped)?|bhool|chhoot)\b|छूट|भूल|मिस/i.test(query)
     && /\b(?:show|list|dikhao|kal|yesterday|which|kaunsi|konsi)\b|दिखाओ|कौनसी|कौन\s*सी|कल/i.test(query)) return 'MISSED';
   return null;
 };

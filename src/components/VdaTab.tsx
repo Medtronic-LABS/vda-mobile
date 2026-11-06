@@ -16,6 +16,18 @@ import { Capacitor } from '@capacitor/core';
 import { MedicineReminderSnapshot, PatientAdherenceAction } from '../services/medicine-reminder.service';
 import { EmergencyFallbackCard } from './EmergencyFallbackCard';
 
+// Official links in replies (e.g. the Ayushman beneficiary portal) open in the phone's browser.
+const withTappableLinks = (text: string): React.ReactNode[] =>
+  text.split(/(https?:\/\/[^\s]+)/g).map((part, index) =>
+    /^https?:\/\//.test(part) ? (
+      <a key={index} href={part} target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-400 underline underline-offset-2 break-all">
+        {part.replace(/^https?:\/\//, '')}
+      </a>
+    ) : (
+      part
+    ),
+  );
+
 interface VdaTabProps {
   patient: PatientDemographics;
   lang: LanguageCode;
@@ -725,7 +737,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
                 {msg.sections?.map((section, sectionIndex) => (
                   <section key={`${msg.id}-section-${sectionIndex}`} className="mt-2 space-y-1">
                     {section.title && <p className="font-semibold text-slate-100">{section.title}</p>}
-                    {section.body && <p className="whitespace-pre-line font-medium">{section.body}</p>}
+                    {section.body && <p className="whitespace-pre-line font-medium">{withTappableLinks(section.body)}</p>}
                     {section.bullets && section.bullets.length > 0 && (
                       <ul className="list-disc space-y-0.5 pl-5">
                         {section.bullets.map((bullet, bulletIndex) => (

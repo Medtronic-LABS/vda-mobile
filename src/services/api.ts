@@ -584,7 +584,8 @@ class ApiService {
         : [];
 
       const message: ChatMessage = {
-        id: `turn-msg-${turnResult.turn_number || Date.now()}`,
+        // Turn numbers restart in each session, so the session keeps chat keys unique.
+        id: `turn-msg-${activeSession}-${turnResult.turn_number || Date.now()}`,
         sender: 'vda',
         agent: turnResult.selected_agent || 'router',
         text: textEn || textHi,

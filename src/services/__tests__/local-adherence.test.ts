@@ -58,6 +58,9 @@ describe('local-only medication adherence', () => {
     ['Kal ki missed medicines dikhao.', 'MISSED'],
     ['Meri medicine lene ki streak kitni hai?', 'STREAK'],
     ['Maine galti se medicine taken mark kar di.', 'CORRECTION'],
+    // Hindi voice input writes "pending" and "miss" in Devanagari.
+    ['आज कौन सी मेडिसिन पेंडिंग है?', 'PENDING'],
+    ['कल कौन सी दवाई मिस हुई?', 'MISSED'],
   ] as const)('recognizes %s as %s rather than a prescription list', (question, kind) => {
     expect(classifyAdherenceQuestion(question)).toBe(kind);
   });
@@ -66,6 +69,8 @@ describe('local-only medication adherence', () => {
     'Aaj ki pending medicine kya abhi le lu?',
     'Should I take a missed dose now?',
     'Can I double my pending medicine?',
+    'मेरी कल की दवाई मिस हुई थी, क्या करूँ?',
+    'Meri kal ki dawai miss ho gayi, kya karu?',
   ])('does not answer a clinical dose decision locally: %s', (question) => {
     expect(classifyAdherenceQuestion(question)).toBeNull();
   });

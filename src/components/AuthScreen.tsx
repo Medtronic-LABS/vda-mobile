@@ -139,7 +139,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
   const t = {
     hi: {
-      appName: 'VDA स्वास्थ्य साथी',
+      appName: 'सेहत साथी',
       appSubtitle: 'राष्ट्रीय स्वास्थ्य प्राधिकरण • भारत सरकार',
       signInTab: 'साइन इन',
       signUpTab: 'नया खाता बनाएं',
@@ -171,7 +171,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       needAccount: 'खाता नहीं है? नया पंजीकरण करें',
     },
     en: {
-      appName: 'VDA Health Navigator',
+      appName: 'Sehat Saathi',
       appSubtitle: 'National Health Authority • Pilot Cohort',
       signInTab: 'Sign In',
       signUpTab: 'Sign Up',

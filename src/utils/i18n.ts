@@ -2,7 +2,7 @@ import { LanguageCode } from '../types';
 
 export const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {
   hi: {
-    appTitle: 'VDA स्वास्थ्य साथी',
+    appTitle: 'सेहत साथी',
     appSubtitle: 'राष्ट्रीय स्वास्थ्य प्राधिकरण (ABDM) समर्थित',
     tabVda: 'VDA साथी',
     tabRecords: 'रिकॉर्ड्स',
@@ -54,7 +54,7 @@ export const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {
     nearbyHospitalChip: 'नजदीकी सरकारी अस्पताल',
     pmjayBenefitsChip: 'आयुष्मान भारत योजना लाभ',
     chestPainTestChip: 'छाती में दर्द [सुरक्षा जांच]',
-    onboardingTitle: 'नमस्ते! VDA स्वास्थ्य साथी में आपका स्वागत है',
+    onboardingTitle: 'नमस्ते! सेहत साथी में आपका स्वागत है',
     onboardingSubtitle: 'आपकी आवाज में आपका व्यक्तिगत स्वास्थ्य मार्गदर्शक',
     selectLanguage: 'अपनी भाषा चुनें',
     selectLanguageHint: 'अपनी पसंदीदा भाषा चुनें (आवाज में सुनने के लिए किसी भी विकल्प को दबाएं)',
@@ -127,8 +127,8 @@ export const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {
     labAgent: 'जांच विशेषज्ञ',
     hospitalAgent: 'अस्पताल मार्गदर्शक',
     schemeAgent: 'आयुष्मान योजना',
-    multiAgentVda: 'VDA स्वास्थ्य साथी',
-    welcomeIntroTitle: 'नमस्ते! मैं आपका VDA स्वास्थ्य साथी हूँ',
+    multiAgentVda: 'सेहत साथी',
+    welcomeIntroTitle: 'नमस्ते! मैं आपकी सेहत साथी हूँ',
     welcomeIntroDesc: 'दवाइयों का समय, जांच रिपोर्ट, नजदीकी अस्पताल या सरकारी योजनाओं के बारे में अपनी आवाज में पूछें।',
     tabRecordsMeds: 'दवाइयां',
     tabRecordsLabs: 'जांच व बीपी',
@@ -206,7 +206,7 @@ export const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {
     tabBloodBank: 'ब्लड बैंक'
   },
   en: {
-    appTitle: 'VDA Health Navigator',
+    appTitle: 'Sehat Saathi',
     appSubtitle: 'Powered by ABDM & National Health Authority',
     tabVda: 'VDA Assistant',
     tabRecords: 'My Records',
@@ -258,7 +258,7 @@ export const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {
     nearbyHospitalChip: 'Nearby ABDM hospital',
     pmjayBenefitsChip: 'Ayushman PM-JAY coverage',
     chestPainTestChip: 'Severe chest pain [Safety Trigger]',
-    onboardingTitle: 'Welcome to VDA Health Navigator',
+    onboardingTitle: 'Welcome to Sehat Saathi',
     onboardingSubtitle: 'Voice-first AI Health Assistant backed by ABDM standards',
     selectLanguage: 'Select Your Preferred Language',
     selectLanguageHint: 'Choose your language (tap any button to hear audio intro)',
@@ -331,8 +331,8 @@ export const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {
     labAgent: 'Lab Agent',
     hospitalAgent: 'Hospital Agent',
     schemeAgent: 'PM-JAY Scheme',
-    multiAgentVda: 'VDA Health Assistant',
-    welcomeIntroTitle: 'Namaste! I am your VDA Health Assistant',
+    multiAgentVda: 'Sehat Saathi',
+    welcomeIntroTitle: 'Namaste! I am Sehat Saathi, your health companion',
     welcomeIntroDesc: 'Ask in your voice about your medicines, lab observations, nearby ABDM hospitals, or PM-JAY scheme.',
     tabRecordsMeds: 'Medications',
     tabRecordsLabs: 'Labs & Vitals',

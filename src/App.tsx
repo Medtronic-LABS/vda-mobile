@@ -71,8 +71,8 @@ const defaultDemographics: PatientDemographics = {
 
 const createWelcomeMessage = (user?: UserProfile | null): ChatMessage => ({
   id: 'welcome-01', sender: 'vda', agent: 'router',
-  text: user?.fullName ? `Namaste ${user.fullName} ji. I am your VDA Health Assistant. How can I help you today?` : 'Namaste ji. I am your VDA Health Assistant. How can I help you today?',
-  textHi: user?.fullName ? `नमस्ते ${user.fullName} जी। मैं आपका VDA स्वास्थ्य साथी हूँ। आज मैं आपकी क्या सहायता कर सकता हूँ?` : 'नमस्ते जी। मैं आपका VDA स्वास्थ्य साथी हूँ। आज मैं आपकी क्या सहायता कर सकता हूँ?',
+  text: user?.fullName ? `Namaste ${user.fullName} ji. I am Sehat Saathi, your health companion. How can I help you today?` : 'Namaste ji. I am Sehat Saathi, your health companion. How can I help you today?',
+  textHi: user?.fullName ? `नमस्ते ${user.fullName} जी। मैं आपकी सेहत साथी हूँ। आज मैं आपकी क्या मदद कर सकती हूँ?` : 'नमस्ते जी। मैं आपकी सेहत साथी हूँ। आज मैं आपकी क्या मदद कर सकती हूँ?',
   textTa: user?.fullName ? `வணக்கம் ${user.fullName} அவர்களே. நான் உங்கள் VDA சுகாதார உதவியாளர். இன்று உங்களுக்கு எவ்வாறு உதவலாம்?` : 'வணக்கம். நான் உங்கள் VDA சுகாதார உதவியாளர். இன்று உங்களுக்கு எவ்வாறு உதவலாம்?',
   textKn: user?.fullName ? `ನಮಸ್ಕಾರ ${user.fullName} ಅವರೇ. ನಾನು ನಿಮ್ಮ VDA ಆರೋಗ್ಯ ಸಹಾಯಕ. ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?` : 'ನಮಸ್ಕಾರ. ನಾನು ನಿಮ್ಮ VDA ಆರೋಗ್ಯ ಸಹಾಯಕ. ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?',
   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -309,8 +309,8 @@ export default function App() {
       id: 'welcome-01',
       sender: 'vda',
       agent: 'router',
-      text: `Namaste ji. I am your VDA Health Assistant. How can I help you today?`,
-      textHi: `नमस्ते जी। मैं आपका VDA स्वास्थ्य साथी हूँ। आज मैं आपकी क्या सहायता कर सकता हूँ?`,
+      text: `Namaste ji. I am Sehat Saathi, your health companion. How can I help you today?`,
+      textHi: `नमस्ते जी। मैं आपकी सेहत साथी हूँ। आज मैं आपकी क्या मदद कर सकती हूँ?`,
       textTa: `வணக்கம். நான் உங்கள் VDA சுகாதார உதவியாளர். இன்று உங்களுக்கு எவ்வாறு உதவலாம்?`,
       textKn: `ನಮಸ್ಕಾರ. ನಾನು ನಿಮ್ಮ VDA ಆರೋಗ್ಯ ಸಹಾಯಕ. ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -332,8 +332,8 @@ export default function App() {
           return [
             {
               ...prev[0],
-              text: `Namaste ${currentUser.fullName} ji. I am your VDA Health Assistant. How can I help you today?`,
-              textHi: `नमस्ते ${currentUser.fullName} जी। मैं आपका VDA स्वास्थ्य साथी हूँ। आज मैं आपकी क्या सहायता कर सकता हूँ?`,
+              text: `Namaste ${currentUser.fullName} ji. I am Sehat Saathi, your health companion. How can I help you today?`,
+              textHi: `नमस्ते ${currentUser.fullName} जी। मैं आपकी सेहत साथी हूँ। आज मैं आपकी क्या मदद कर सकती हूँ?`,
               textTa: `வணக்கம் ${currentUser.fullName} அவர்களே. நான் உங்கள் VDA சுகாதார உதவியாளர். இன்று உங்களுக்கு எவ்வாறு உதவலாம்?`,
               textKn: `ನಮಸ್ಕಾರ ${currentUser.fullName} ಅವರೇ. ನಾನು ನಿಮ್ಮ VDA ಆರೋಗ್ಯ ಸಹಾಯಕ. ಇಂದು ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?`,
             },
@@ -535,14 +535,28 @@ export default function App() {
             const clarify = submission.verificationStatus === 'NEEDS_RESUBMISSION';
             if (reviewed || rejected || clarify) {
               const notice = lang === 'hi'
-                ? reviewed ? 'आपकी पर्ची की जाँच हो गई है। दवाइयाँ देखें और रिमाइंडर सेट करें।'
+                ? reviewed ? 'कम्युनिटी हेल्थ ऑफिसर (CHO) ने आपकी पर्ची मंज़ूर कर दी है। दवाइयाँ देखें और रिमाइंडर सेट करें।'
                   : rejected ? 'आपकी पर्ची मंज़ूर नहीं हुई। कृपया दवाइयाँ टैब में स्थिति देखें।'
                     : 'आपकी पर्ची के लिए साफ़ फोटो चाहिए। कृपया दवाइयाँ टैब देखें।'
-                : reviewed ? 'Your prescription has been reviewed. Check your medicines and set reminders.'
+                : reviewed ? 'The Community Health Officer (CHO) has approved your prescription. Check your medicines and set reminders.'
                   : rejected ? 'Your prescription was not approved. Check the Medicines tab.'
                     : 'A clearer prescription is needed. Check the Medicines tab.';
               await Preferences.set({ key: noticeKey, value: notice });
-              if (activeUserIdRef.current === userId && accountGenerationRef.current === generation) setPrescriptionStatusNotice(notice);
+              if (activeUserIdRef.current === userId && accountGenerationRef.current === generation) {
+                setPrescriptionStatusNotice(notice);
+                // Clinical review: VDA itself tells the patient once the CHO has decided.
+                setMessages((previous) => [...previous, {
+                  id: `prescription-status-${cursor}`,
+                  sender: 'vda',
+                  agent: 'medication',
+                  text: notice,
+                  textHi: notice,
+                  textTa: notice,
+                  textKn: notice,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  audioAvailable: true,
+                }]);
+              }
             }
             await Preferences.set({ key: statusKey, value: cursor });
           } else {
@@ -1008,7 +1022,7 @@ export default function App() {
         const processingSnapshot = await medicineReminderService.snapshot(submissionUserId);
         if (activeUserIdRef.current !== submissionUserId || accountGenerationRef.current !== submissionGeneration) return;
         setMedicineReminderSnapshot(processingSnapshot);
-        appendConversationMessage('मैं आपकी पर्ची देख रहा हूँ…');
+        appendConversationMessage('मैं आपकी पर्ची देख रही हूँ…');
         const prescription = await apiService.uploadPrescription(currentSessionId, attachmentFile);
         if (activeUserIdRef.current !== submissionUserId || accountGenerationRef.current !== submissionGeneration) return;
         const draft = prescriptionToReminderDraft(submissionUserId, prescription);
@@ -1316,7 +1330,7 @@ export default function App() {
       <div className="flex h-screen w-screen items-center justify-center bg-slate-950 text-emerald-400">
         <div className="flex flex-col items-center gap-3">
           <Sparkles className="w-8 h-8 animate-pulse text-emerald-400" />
-          <span className="text-xs font-bold font-mono tracking-wider">VDA HEALTH NAVIGATOR</span>
+          <span className="text-xs font-bold font-mono tracking-wider">SEHAT SAATHI</span>
         </div>
       </div>
     );

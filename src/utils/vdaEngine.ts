@@ -25,7 +25,8 @@ export function getChatMessageSpeechText(msg: ChatMessage, lang: LanguageCode): 
   const summary = getChatMessageText(msg, lang);
   const sectionText = msg.sections?.flatMap((section) => [
     !section.body && !section.bullets?.length ? section.title : undefined,
-    section.body,
+    // Links are shown on screen to tap, never spelled out by the voice.
+    section.body?.replace(/https?:\/\/\S+/g, ''),
     ...(section.bullets || []),
   ]).filter((value): value is string => Boolean(value?.trim()) && value.trim() !== summary.trim()).join('\n');
   return sectionText ? `${summary}\n\n${sectionText}` : summary;
@@ -210,8 +211,8 @@ export function processVdaQuery(
   // Default Conversational Health Navigation
   else {
     agent = 'triage';
-    replyText = `Namaste ${patient.name} ji. I am your VDA Health Assistant. You can ask me about your medicine timings, understand your lab reports, find nearby government hospitals, or check Ayushman Bharat scheme benefits. Tap the microphone anytime to speak!`;
-    replyTextHi = `नमस्ते ${patient.name} जी। मैं आपका VDA स्वास्थ्य साथी हूँ। आप मुझसे अपनी दवाइयों का समय, जांच रिपोर्ट का मतलब, नजदीकी सरकारी अस्पताल या आयुष्मान योजना के बारे में पूछ सकते हैं। बोलने के लिए कभी भी माइक दबाएं!`;
+    replyText = `Namaste ${patient.name} ji. I am Sehat Saathi, your health companion. You can ask me about your medicine timings, understand your lab reports, find nearby government hospitals, or check Ayushman Bharat scheme benefits. Tap the microphone anytime to speak!`;
+    replyTextHi = `नमस्ते ${patient.name} जी। मैं आपकी सेहत साथी हूँ। आप मुझसे अपनी दवाइयों का समय, जांच रिपोर्ट का मतलब, नजदीकी सरकारी अस्पताल या आयुष्मान योजना के बारे में पूछ सकते हैं। बोलने के लिए कभी भी माइक दबाएं!`;
     replyTextTa = `வணக்கம் ${patient.name} அவர்களே. நான் உங்கள் VDA சுகாதார உதவியாளர். உங்கள் மருந்து நேரம், ஆய்வக அறிக்கைகள், அருகிலுள்ள மருத்துவமனைகள் அல்லது அரசு திட்டங்கள் குறித்து கேட்கலாம். பேச மைக் தட்டவும்!`;
     replyTextKn = `ನಮಸ್ಕಾರ ${patient.name} ಅವರೇ. ನಾನು ನಿಮ್ಮ VDA ಆರೋಗ್ಯ ಸಹಾಯಕ. ಔಷಧಿ ಸಮಯ, ಲ್ಯಾಬ್ ವರದಿಗಳು, ಹತ್ತಿರದ ಆಸ್ಪತ್ರೆಗಳು ಅಥವಾ ಸರ್ಕಾರಿ ಯೋಜನೆಗಳ ಬಗ್ಗೆ ಕೇಳಬಹುದು. ಮಾತನಾಡಲು ಮೈಕ್ ಒತ್ತಿರಿ!`;
 

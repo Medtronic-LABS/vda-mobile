@@ -53,8 +53,8 @@ class PushNotificationService {
     if (!this.initialized) return;
     try {
       await PushNotifications.createChannel({
-        id: 'prescription_updates', name: 'VDA Health updates',
-        description: 'Updates about your VDA Health account', importance: 4,
+        id: 'prescription_updates', name: 'Sehat Saathi updates',
+        description: 'Updates about your Sehat Saathi account', importance: 4,
       });
       let permission = await PushNotifications.checkPermissions();
       if (permission.receive === 'prompt') permission = await PushNotifications.requestPermissions();
