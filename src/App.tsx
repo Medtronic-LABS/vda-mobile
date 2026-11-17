@@ -1347,7 +1347,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-[100dvh] max-h-[100dvh] w-full bg-slate-950 text-slate-100 flex justify-center selection:bg-emerald-500 selection:text-white overflow-hidden">
+    <div className="h-[100dvh] max-h-[100dvh] w-full pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] bg-slate-950 text-slate-100 flex justify-center selection:bg-emerald-500 selection:text-white overflow-hidden">
       {/* Responsive Full-Screen Mobile App Container (Up to max-w-xl on larger screens) */}
       <div className="w-full max-w-xl h-full max-h-full bg-slate-950 flex flex-col relative border-x border-slate-800/80 shadow-2xl overflow-hidden">
         {!sessionPersisted && (

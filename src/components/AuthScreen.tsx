@@ -194,7 +194,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-950 text-slate-100 overflow-y-auto">
       {/* Top Header & Language Bar */}
-      <header className="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between sticky top-0 z-20 backdrop-blur-md">
+      <header className="px-4 pb-3 pt-[calc(0.75rem_+_env(safe-area-inset-top))] bg-slate-900/90 border-b border-slate-800 flex items-center justify-between sticky top-0 z-20 backdrop-blur-md">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-slate-950 font-black text-sm shadow-md shadow-emerald-950/50">
             <Sparkles className="w-4 h-4 text-white" />
