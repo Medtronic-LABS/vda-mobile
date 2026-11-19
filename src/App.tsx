@@ -12,6 +12,7 @@ import { pushNotificationService } from './services/push-notification.service';
 // Tab & Modal Components
 import { VdaTab } from './components/VdaTab';
 import { MedicalReportsPanel } from './components/MedicalReportsPanel';
+import { REPORTS_ENABLED } from './config/features';
 import { RemindersTab } from './components/RemindersTab';
 import { PatientFacilitiesTab } from './components/PatientFacilitiesTab';
 import { ProfileTab } from './components/ProfileTab';
@@ -1416,7 +1417,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'reports' && (
+          {REPORTS_ENABLED && activeTab === 'reports' && (
             <MedicalReportsPanel
               sessionId={activeSessionId}
               lang={lang}
@@ -1503,14 +1504,16 @@ export default function App() {
             <span className="text-[11px] leading-tight">{getTranslation(lang, 'tabVda')}</span>
           </button>
 
-          <button
-            id="nav-tab-reports"
-            onClick={() => { playChime('start'); setActiveTab('reports'); }}
-            className={`flex-1 min-h-14 py-1.5 flex flex-col items-center gap-0.5 rounded-xl transition-all ${activeTab === 'reports' ? 'text-emerald-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            <div className={`p-1.5 rounded-xl ${activeTab === 'reports' ? 'bg-emerald-500/20' : ''}`}><FileText className="w-5 h-5" /></div>
-            <span className="text-[11px] leading-tight">{lang === 'hi' ? 'मेरी रिपोर्ट' : 'Reports'}</span>
-          </button>
+          {REPORTS_ENABLED && (
+            <button
+              id="nav-tab-reports"
+              onClick={() => { playChime('start'); setActiveTab('reports'); }}
+              className={`flex-1 min-h-14 py-1.5 flex flex-col items-center gap-0.5 rounded-xl transition-all ${activeTab === 'reports' ? 'text-emerald-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              <div className={`p-1.5 rounded-xl ${activeTab === 'reports' ? 'bg-emerald-500/20' : ''}`}><FileText className="w-5 h-5" /></div>
+              <span className="text-[11px] leading-tight">{lang === 'hi' ? 'मेरी रिपोर्ट' : 'Reports'}</span>
+            </button>
+          )}
 
           <button
             id="nav-tab-reminders"

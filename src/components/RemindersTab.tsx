@@ -437,7 +437,7 @@ export const RemindersTab: React.FC<RemindersTabProps> = ({
                         </div>
 
                         <div className="flex flex-wrap items-center justify-end gap-1">
-                          {(['TAKEN', 'SKIPPED', 'NOT_TAKEN'] as PatientAdherenceAction[]).map((action) => (
+                          {(['TAKEN', 'NOT_TAKEN'] as PatientAdherenceAction[]).map((action) => (
                             <button
                               key={action}
                               type="button"

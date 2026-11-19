@@ -10,6 +10,7 @@ import { waitForAudioPlayback } from '../services/voice-playback';
 import { VdaApiError } from '../services/api';
 import { ChatMessage, ClinicalReviewFacility, LanguageCode, PatientDemographics } from '../types';
 import { getTranslation, playChime } from '../utils/i18n';
+import { REPORTS_ENABLED } from '../config/features';
 import { getChatMessageText, getQuickActionLabel, getCardTitle } from '../utils/vdaEngine';
 import { apiService } from '../services/api';
 import { Capacitor } from '@capacitor/core';
@@ -660,7 +661,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
                     <span className="w-10 text-[11px] font-bold text-emerald-300">{time}</span>
                     <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-100">{outcome === 'TAKEN' ? '✓ ' : '○ '}{reminder.medicineName}</span>
                     <div className="flex flex-wrap justify-end gap-1">
-                      {(['TAKEN', 'SKIPPED', 'NOT_TAKEN'] as PatientAdherenceAction[]).map((action) => <button key={action} type="button" disabled={medicineActionBusy === key || outcome === action} onClick={() => void recordMedicineAdherence(reminder.id, time, action)} className={`rounded-md px-2 py-1 text-[10px] font-bold disabled:opacity-60 ${outcome === action ? 'border border-emerald-500/40 bg-emerald-500/20 text-emerald-300' : 'border border-slate-600 text-slate-200'}`}>
+                      {(['TAKEN', 'NOT_TAKEN'] as PatientAdherenceAction[]).map((action) => <button key={action} type="button" disabled={medicineActionBusy === key || outcome === action} onClick={() => void recordMedicineAdherence(reminder.id, time, action)} className={`rounded-md px-2 py-1 text-[10px] font-bold disabled:opacity-60 ${outcome === action ? 'border border-emerald-500/40 bg-emerald-500/20 text-emerald-300' : 'border border-slate-600 text-slate-200'}`}>
                         {lang === 'hi' ? ({ TAKEN: 'ले ली', SKIPPED: 'छोड़ दी', NOT_TAKEN: 'नहीं ली' } as const)[action] : ({ TAKEN: 'Taken', SKIPPED: 'Skip', NOT_TAKEN: 'Not taken' } as const)[action]}
                       </button>)}
                       <button type="button" disabled={medicineActionBusy === key} onClick={() => void snoozeMedicineReminder(reminder.id, time)} className="rounded-md border border-slate-600 px-2 py-1 text-[10px] font-semibold text-slate-200 disabled:opacity-60">
@@ -811,7 +812,7 @@ export const VdaTab: React.FC<VdaTabProps> = ({
               {/* Quick Action Buttons */}
               {msg.quickActions && msg.quickActions.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
-                  {msg.quickActions.map((qa, i) => (
+                  {msg.quickActions.filter((qa) => REPORTS_ENABLED || qa.action !== 'ask_sugar_lab').map((qa, i) => (
                     (() => {
                       const reminderAction = ['setup_medicine_reminders', 'confirm_medicine_reminders', 'skip_medicine_reminders', 'change_medicine_reminder_time'].includes(qa.action);
                       const reminderStepStatus = msg.reminderStepId ? reminderStepStates[msg.reminderStepId] : undefined;
@@ -954,14 +955,16 @@ export const VdaTab: React.FC<VdaTabProps> = ({
             <Pill className="w-3.5 h-3.5 text-blue-400" />
             <span>{getTranslation(lang, 'myMedicinesChip')}</span>
           </button>
-          <button
-            onClick={() => onSendMessage(getTranslation(lang, 'sugarLabChip'))}
-            disabled={isProcessing || voiceInteractionBusy}
-            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95 disabled:opacity-40"
-          >
-            <Activity className="w-3.5 h-3.5 text-emerald-400" />
-            <span>{getTranslation(lang, 'sugarLabChip')}</span>
-          </button>
+          {REPORTS_ENABLED && (
+            <button
+              onClick={() => onSendMessage(getTranslation(lang, 'sugarLabChip'))}
+              disabled={isProcessing || voiceInteractionBusy}
+              className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-900/90 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center gap-1.5 active:scale-95 disabled:opacity-40"
+            >
+              <Activity className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{getTranslation(lang, 'sugarLabChip')}</span>
+            </button>
+          )}
           <button
             onClick={() => onSendMessage(getTranslation(lang, 'nearbyHospitalChip'))}
             disabled={isProcessing || voiceInteractionBusy}
